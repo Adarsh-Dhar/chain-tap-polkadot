@@ -6,9 +6,9 @@ export const dynamic = "force-dynamic"
 
 export async function POST(
   req: Request,
-  { params }: { params: { contractId: string } }
+  { params }: { params: Promise<{ contractId: string }> }
 ) {
-  const { contractId } = params
+  const { contractId } = await params
   const secret = process.env.SHOPIFY_WEBHOOK_SECRET || ""
   
   if (!secret) {

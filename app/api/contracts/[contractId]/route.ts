@@ -6,10 +6,10 @@ export const dynamic = "force-dynamic"
 
 export async function GET(
   req: Request,
-  { params }: { params: { contractId: string } }
+  { params }: { params: Promise<{ contractId: string }> }
 ) {
   try {
-    const { contractId } = params
+    const { contractId } = await params
     const id = parseInt(contractId, 10)
 
     if (isNaN(id)) {
