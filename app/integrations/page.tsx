@@ -36,15 +36,44 @@ const integrations = [
 
 export default function IntegrationsPage() {
   const [origin, setOrigin] = useState("")
+  const [contractId, setContractId] = useState<number | null>(null)
+  const [loading, setLoading] = useState(true)
+
   useEffect(() => {
     if (typeof window !== "undefined") {
       setOrigin(window.location.origin)
+      
+      // Try to get contract ID from localStorage (set by admin)
+      const storedId = localStorage.getItem("contractId")
+      if (storedId) {
+        const id = parseInt(storedId, 10)
+        if (!isNaN(id)) {
+          setContractId(id)
+          setLoading(false)
+          return
+        }
+      }
+      
+      // Otherwise, fetch from API
+      fetch("/api/contracts")
+        .then((res) => res.json())
+        .then((contracts) => {
+          if (Array.isArray(contracts) && contracts.length > 0) {
+            setContractId(contracts[0].id)
+            localStorage.setItem("contractId", String(contracts[0].id))
+          }
+          setLoading(false)
+        })
+        .catch(() => {
+          setLoading(false)
+        })
     }
   }, [])
 
   const webhookUrl = useMemo(() => {
-    return origin ? `${origin}/api/shopify/webhook` : "/api/shopify/webhook"
-  }, [origin])
+    if (!contractId || !origin) return "/api/shopify/webhook"
+    return `${origin}/api/shopify/webhook/${contractId}`
+  }, [contractId, origin])
 
   async function copyWebhook() {
     try {
@@ -67,18 +96,31 @@ export default function IntegrationsPage() {
             </div>
           </CardHeader>
           <CardContent>
-            <div className="grid gap-4 sm:grid-cols-[1fr_auto] items-center">
-              <div className="space-y-2">
-                <div className="text-sm text-muted-foreground">Webhook URL</div>
-                <Input readOnly value={webhookUrl} />
+            {loading ? (
+              <div className="text-sm text-muted-foreground">Loading webhook URL...</div>
+            ) : contractId ? (
+              <>
+                <div className="grid gap-4 sm:grid-cols-[1fr_auto] items-center">
+                  <div className="space-y-2">
+                    <div className="text-sm text-muted-foreground">Webhook URL</div>
+                    <Input readOnly value={webhookUrl} />
+                  </div>
+                  <div className="pt-6 sm:pt-0">
+                    <Button onClick={copyWebhook} className="w-full sm:w-auto">Copy URL</Button>
+                  </div>
+                </div>
+                <div className="text-xs text-muted-foreground mt-4">
+                  Contract ID: <code className="bg-gray-100 px-1 rounded">{contractId}</code>
+                </div>
+                <div className="text-xs text-muted-foreground mt-2">
+                  Configure in Shopify: Settings → Notifications → Webhooks → Create → Event: Order creation → URL above → JSON.
+                </div>
+              </>
+            ) : (
+              <div className="text-sm text-muted-foreground">
+                No contract found. Please contact admin to set up your webhook URL.
               </div>
-              <div className="pt-6 sm:pt-0">
-                <Button onClick={copyWebhook} className="w-full sm:w-auto">Copy URL</Button>
-              </div>
-            </div>
-            <div className="text-xs text-muted-foreground mt-4">
-              Configure in Shopify: Settings → Notifications → Webhooks → Create → Event: Order creation → URL above → JSON.
-            </div>
+            )}
           </CardContent>
         </Card>
         <div className="grid gap-6 md:grid-cols-2">
