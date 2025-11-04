@@ -55,7 +55,8 @@ export async function POST(
     return new Response("contract_not_found", { status: 404 })
   }
 
-  const phatUrl = contract.phalaEndpoint
+  const base = (contract.phalaEndpoint || "").replace(/\/$/, "")
+  const phatUrl = `${base}/forward-order`
   const forwardToken = process.env.PHAT_FORWARD_TOKEN || ""
 
   if (phatUrl) {

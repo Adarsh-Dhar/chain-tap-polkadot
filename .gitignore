@@ -2,6 +2,7 @@
 
 # dependencies
 /node_modules
+/my-phala-forwarder/node_modules/
 
 # next.js
 /.next/

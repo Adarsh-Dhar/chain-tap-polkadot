@@ -23,6 +23,7 @@ model Contract {
   updatedAt     DateTime @updatedAt
 
   @@map("contracts")
+  OrderReward OrderReward[]
 }
 
 model OrderReward {
