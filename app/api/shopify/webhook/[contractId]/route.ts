@@ -67,6 +67,7 @@ export async function POST(
         headers: {
           "content-type": "application/json",
           "x-forward-token": forwardToken,
+          "x-contract-id": String(contractId),
         },
         body: JSON.stringify(body),
         signal: controller.signal,

@@ -30,6 +30,10 @@ PHAT_FORWARD_TOKEN=shared-forward-token
 
 Use “Send test notification” to validate.
 
+### Sample Payload
+
+See `docs/sample-shopify-order.json` for a sample `orders/create` payload including a Polkadot SS58 address in the `note` field.
+
 ## Phala Cloud Forwarder
 
 This repo includes a minimal forwarder you can deploy to Phala Cloud:

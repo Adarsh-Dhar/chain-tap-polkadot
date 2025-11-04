@@ -14,9 +14,33 @@ model Contract {
   id            Int      @id @default(autoincrement())
   phalaEndpoint String
   merchantName  String?
+  // Loyalty token configuration
+  assetId       Int?
+  tokensPerOrder Int? // fixed tokens per order
+  signerAddress String?
+  webhookUrl    String?
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
   @@map("contracts")
+}
+
+model OrderReward {
+  id          Int      @id @default(autoincrement())
+  contractId  Int
+  orderId     String
+  wallet      String?
+  amount      String?   // store as string to avoid JS bigint issues
+  assetId     Int?
+  status      String    // pending | success | failed
+  txHash      String?
+  error       String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  contract    Contract  @relation(fields: [contractId], references: [id])
+
+  @@unique([contractId, orderId])
+  @@map("order_rewards")
 }
 

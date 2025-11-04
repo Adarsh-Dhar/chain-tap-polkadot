@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -10,8 +10,40 @@ export default function TokenConfigCard() {
   const [tokenId, setTokenId] = useState("")
   const [tokensPerOrder, setTokensPerOrder] = useState("")
   const [saved, setSaved] = useState(false)
+  const [contractId, setContractId] = useState<number | null>(null)
+  const [loading, setLoading] = useState(true)
 
-  const handleSave = () => {
+  useEffect(() => {
+    let mounted = true
+    async function load() {
+      try {
+        const res = await fetch("/api/contracts")
+        const list = await res.json()
+        if (!mounted) return
+        if (Array.isArray(list) && list.length > 0) {
+          const c = list[0]
+          setContractId(c.id)
+          if (typeof c.assetId === "number") setTokenId(String(c.assetId))
+          if (typeof c.tokensPerOrder === "number") setTokensPerOrder(String(c.tokensPerOrder))
+        }
+      } finally {
+        if (mounted) setLoading(false)
+      }
+    }
+    load()
+    return () => { mounted = false }
+  }, [])
+
+  const handleSave = async () => {
+    if (!contractId) return
+    const payload: any = {}
+    if (tokenId) payload.assetId = parseInt(tokenId, 10)
+    if (tokensPerOrder) payload.tokensPerOrder = parseInt(tokensPerOrder, 10)
+    await fetch(`/api/contracts/${contractId}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(payload),
+    })
     setSaved(true)
     setTimeout(() => setSaved(false), 2000)
   }
@@ -31,6 +63,9 @@ export default function TokenConfigCard() {
       </CardHeader>
       <CardContent>
         <div className="space-y-4">
+          {loading ? (
+            <div className="text-sm text-muted-foreground">Loading configuration...</div>
+          ) : null}
           <div className="space-y-2">
             <Label htmlFor="token-id" className="text-sm font-medium text-gray-700">
               Polkadot Asset Hub Token ID
@@ -58,9 +93,12 @@ export default function TokenConfigCard() {
             />
           </div>
 
-          <Button onClick={handleSave} className="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium mt-6">
+          <Button onClick={handleSave} className="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium mt-6" disabled={!contractId}>
             {saved ? "✓ Configuration Saved" : "Save Configuration"}
           </Button>
+          {contractId ? (
+            <div className="text-xs text-muted-foreground">Contract ID: <code className="bg-gray-100 px-1 rounded">{contractId}</code></div>
+          ) : null}
         </div>
       </CardContent>
     </Card>

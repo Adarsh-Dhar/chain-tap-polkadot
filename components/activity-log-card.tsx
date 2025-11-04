@@ -1,37 +1,35 @@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { useEffect, useState } from "react"
 
-const ACTIVITY_DATA = [
-  {
-    timestamp: "2024-11-03 14:32:00",
-    orderId: "#ORD-001847",
-    wallet: "13...y7pA",
-    tokensMinted: 100,
-    txHash: "0x45a...bcf2",
-  },
-  {
-    timestamp: "2024-11-03 13:15:22",
-    orderId: "#ORD-001846",
-    wallet: "1A...nQ9K",
-    tokensMinted: 100,
-    txHash: "0x92d...aef1",
-  },
-  {
-    timestamp: "2024-11-03 12:08:45",
-    orderId: "#ORD-001845",
-    wallet: "14...mP3x",
-    tokensMinted: 100,
-    txHash: "0x71c...2e94",
-  },
-  {
-    timestamp: "2024-11-03 11:42:10",
-    orderId: "#ORD-001844",
-    wallet: "1F...kL8M",
-    tokensMinted: 100,
-    txHash: "0x38b...f7c6",
-  },
-]
+function truncate(s: string | null, left = 6, right = 4) {
+  if (!s) return "";
+  if (s.length <= left + right) return s;
+  return `${s.slice(0, left)}...${s.slice(-right)}`;
+}
 
 export default function ActivityLogCard() {
+  const [rows, setRows] = useState<any[]>([])
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    let mounted = true
+    async function load() {
+      try {
+        const contractsRes = await fetch('/api/contracts')
+        const list = await contractsRes.json()
+        if (!Array.isArray(list) || list.length === 0) return
+        const cid = list[0].id
+        const res = await fetch(`/api/rewards?contractId=${cid}`)
+        const data = await res.json()
+        if (!mounted) return
+        setRows(data)
+      } finally {
+        if (mounted) setLoading(false)
+      }
+    }
+    load()
+    return () => { mounted = false }
+  }, [])
   return (
     <Card className="border-gray-200 shadow-sm hover:shadow-md transition-shadow">
       <CardHeader className="pb-4">
@@ -56,17 +54,21 @@ export default function ActivityLogCard() {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
-              {ACTIVITY_DATA.map((row, idx) => (
+              {loading ? (
+                <tr><td className="px-4 py-3 text-sm text-muted-foreground" colSpan={5}>Loading activity...</td></tr>
+              ) : rows.length === 0 ? (
+                <tr><td className="px-4 py-3 text-sm text-muted-foreground" colSpan={5}>No activity yet</td></tr>
+              ) : rows.map((row, idx) => (
                 <tr key={idx} className="hover:bg-gray-50 transition-colors">
-                  <td className="px-4 py-3 text-gray-700 font-mono text-xs">{row.timestamp}</td>
+                  <td className="px-4 py-3 text-gray-700 font-mono text-xs">{new Date(row.createdAt).toISOString().replace('T',' ').slice(0,19)}</td>
                   <td className="px-4 py-3 text-gray-700 font-medium">{row.orderId}</td>
-                  <td className="px-4 py-3 text-gray-600 font-mono">{row.wallet}</td>
+                  <td className="px-4 py-3 text-gray-600 font-mono">{truncate(row.wallet)}</td>
                   <td className="px-4 py-3 text-center">
                     <span className="inline-block px-3 py-1 bg-blue-50 text-blue-700 rounded-full font-semibold text-xs">
-                      {row.tokensMinted}
+                      {row.amount ? row.amount : '-'}
                     </span>
                   </td>
-                  <td className="px-4 py-3 text-gray-600 font-mono">{row.txHash}</td>
+                  <td className="px-4 py-3 text-gray-600 font-mono">{truncate(row.txHash, 10, 6)}</td>
                 </tr>
               ))}
             </tbody>
