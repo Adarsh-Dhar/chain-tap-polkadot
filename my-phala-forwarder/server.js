@@ -1,6 +1,6 @@
 const express = require('express');
 const { parseOrder, isValidWalletAddress } = require('./utils/orderParser');
-const { initPolkadot, mintAndTransferTokens } = require('./utils/blockchain');
+const { initPolkadot, mintAndTransferTokens, getWalletBalance, checkAssetPermissions } = require('./utils/blockchain');
 const { createAssetIfMissing, getSignerAddress } = require('./utils/asset');
 const fetch = require('node-fetch');
 
@@ -8,10 +8,62 @@ const app = express();
 app.use(express.json());
 
 const PHAT_FORWARD_TOKEN = process.env.PHAT_FORWARD_TOKEN;
+
+// Check wallet balance endpoint
+app.get('/balance', async (req, res) => {
+  const receivedToken = req.headers['x-forward-token'];
+  if (!PHAT_FORWARD_TOKEN || receivedToken !== PHAT_FORWARD_TOKEN) {
+    console.error('Unauthorized: Token mismatch', {
+      hasEnvToken: !!PHAT_FORWARD_TOKEN,
+      receivedTokenLength: receivedToken?.length,
+      envTokenLength: PHAT_FORWARD_TOKEN?.length
+    });
+    return res.status(401).json({ status: 'error', message: 'Unauthorized' });
+  }
+  try {
+    await initPolkadot();
+    const balance = await getWalletBalance();
+    return res.status(200).json({ status: 'success', ...balance });
+  } catch (e) {
+    console.error('Balance check error:', e);
+    return res.status(500).json({ status: 'error', message: e.message });
+  }
+});
+
+// Check asset permissions endpoint
+app.get('/asset/:assetId/permissions', async (req, res) => {
+  const receivedToken = req.headers['x-forward-token'];
+  if (!PHAT_FORWARD_TOKEN || receivedToken !== PHAT_FORWARD_TOKEN) {
+    console.error('Unauthorized: Token mismatch', {
+      hasEnvToken: !!PHAT_FORWARD_TOKEN,
+      receivedTokenLength: receivedToken?.length,
+      envTokenLength: PHAT_FORWARD_TOKEN?.length
+    });
+    return res.status(401).json({ status: 'error', message: 'Unauthorized' });
+  }
+  try {
+    const assetId = parseInt(req.params.assetId, 10);
+    if (isNaN(assetId)) {
+      return res.status(400).json({ status: 'error', message: 'Invalid asset ID' });
+    }
+    await initPolkadot();
+    const permissions = await checkAssetPermissions(assetId);
+    return res.status(200).json({ status: 'success', ...permissions });
+  } catch (e) {
+    console.error('Asset permission check error:', e);
+    return res.status(500).json({ status: 'error', message: e.message });
+  }
+});
 // Create asset for a merchant (auto-setup)
 app.post('/assets/create', async (req, res) => {
   const receivedToken = req.headers['x-forward-token'];
   if (!PHAT_FORWARD_TOKEN || receivedToken !== PHAT_FORWARD_TOKEN) {
+    console.error('Unauthorized: Token mismatch', {
+      hasEnvToken: !!PHAT_FORWARD_TOKEN,
+      receivedTokenLength: receivedToken?.length,
+      envTokenLength: PHAT_FORWARD_TOKEN?.length,
+      tokensMatch: receivedToken === PHAT_FORWARD_TOKEN
+    });
     return res.status(401).json({ status: 'error', message: 'Unauthorized' });
   }
   try {
@@ -39,7 +91,12 @@ app.post('/forward-order', async (req, res) => {
   // Validate authentication token
   const receivedToken = req.headers['x-forward-token'];
   if (!PHAT_FORWARD_TOKEN || receivedToken !== PHAT_FORWARD_TOKEN) {
-    console.error('Unauthorized: Invalid or missing forward token');
+    console.error('Unauthorized: Token mismatch', {
+      hasEnvToken: !!PHAT_FORWARD_TOKEN,
+      receivedTokenLength: receivedToken?.length,
+      envTokenLength: PHAT_FORWARD_TOKEN?.length,
+      tokensMatch: receivedToken === PHAT_FORWARD_TOKEN
+    });
     return res.status(401).json({ 
       status: 'error', 
       message: 'Unauthorized: Invalid forward token' 
@@ -245,7 +302,7 @@ app.post('/forward-order', async (req, res) => {
   }
 });
 
-const PORT = 5000;
+const PORT = process.env.PORT || 5000;
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`Server listening on port ${PORT}`);
 });

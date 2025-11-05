@@ -16,9 +16,9 @@ async function initPolkadot() {
   }
 
   try {
-    // Connect to Polkadot Asset Hub (can be testnet or mainnet)
-    const wsUrl = process.env.POLKADOT_WS_URL || 'wss://polkadot-asset-hub-rpc.polkadot.io';
-    console.log('Connecting to Polkadot Asset Hub:', wsUrl);
+    // Connect to local network (can be localnet, testnet, or mainnet)
+    const wsUrl = process.env.POLKADOT_WS_URL || 'ws://localhost:9944';
+    console.log('Connecting to local network:', wsUrl);
     
     const wsProvider = new WsProvider(wsUrl);
     api = await ApiPromise.create({ provider: wsProvider });
@@ -43,13 +43,123 @@ async function initPolkadot() {
       wallet = keyring.addFromUri(seed);
     }
     
-    console.log('✓ Connected to Polkadot Asset Hub');
+    console.log('✓ Connected to local network');
     console.log('✓ Wallet address:', wallet.address);
     
     return api;
   } catch (error) {
     console.error('Error initializing Polkadot connection:', error);
     throw error;
+  }
+}
+
+/**
+ * Get wallet balance information
+ * @returns {Promise<object>} - Balance info with free, reserved, and total
+ */
+async function getWalletBalance() {
+  if (!api) {
+    await initPolkadot();
+  }
+
+  if (!wallet) {
+    throw new Error('Wallet not initialized');
+  }
+
+  try {
+    const accountInfo = await api.query.system.account(wallet.address);
+    const free = accountInfo.data.free;
+    const reserved = accountInfo.data.reserved;
+    const frozen = accountInfo.data.frozen;
+    const total = free.add(reserved);
+
+    // Convert to human-readable format (assuming 10 decimals for DOT/PSE)
+    const decimals = api.registry.chainDecimals[0] || 10;
+    const divisor = new BN(10).pow(new BN(decimals));
+
+    return {
+      address: wallet.address,
+      free: free.toString(),
+      reserved: reserved.toString(),
+      frozen: frozen.toString(),
+      total: total.toString(),
+      freeFormatted: free.div(divisor).toString(),
+      tokenSymbol: api.registry.chainTokens[0] || 'DOT',
+      decimals: decimals
+    };
+  } catch (error) {
+    console.error('Error fetching wallet balance:', error);
+    throw new Error(`Failed to fetch wallet balance: ${error.message}`);
+  }
+}
+
+/**
+ * Check if asset exists and signer has permission to mint
+ * @param {number} assetId - Asset ID to check
+ * @returns {Promise<object>} - Asset info and permission status
+ */
+async function checkAssetPermissions(assetId) {
+  if (!api) {
+    await initPolkadot();
+  }
+
+  if (!wallet) {
+    throw new Error('Wallet not initialized');
+  }
+
+  try {
+    // Check if asset exists
+    const assetInfo = await api.query.assets.asset(assetId);
+    
+    if (assetInfo.isNone) {
+      return {
+        exists: false,
+        canMint: false,
+        error: `Asset ${assetId} does not exist on Asset Hub`
+      };
+    }
+
+    const details = assetInfo.unwrap();
+    const issuer = details.issuer.toString();
+    const admin = details.admin.toString();
+    const signerAddress = wallet.address;
+
+    // Check if signer is issuer or admin
+    const isIssuer = issuer === signerAddress;
+    const isAdmin = admin === signerAddress;
+    const canMint = isIssuer || isAdmin;
+
+    // Get asset metadata
+    let metadata = null;
+    try {
+      const meta = await api.query.assets.metadata(assetId);
+      if (meta.isSome) {
+        const metaData = meta.unwrap();
+        metadata = {
+          name: metaData.name.toHuman(),
+          symbol: metaData.symbol.toHuman(),
+          decimals: metaData.decimals.toNumber()
+        };
+      }
+    } catch (e) {
+      // Metadata query failed, that's okay
+    }
+
+    return {
+      exists: true,
+      canMint: canMint,
+      assetId: assetId,
+      issuer: issuer,
+      admin: admin,
+      signerAddress: signerAddress,
+      isIssuer: isIssuer,
+      isAdmin: isAdmin,
+      metadata: metadata,
+      error: canMint ? null : `Signer ${signerAddress} is not issuer (${issuer}) or admin (${admin}) of asset ${assetId}`
+    };
+  } catch (error) {
+    console.error('Error checking asset permissions:', error);
+    throw new Error(`Failed to check asset permissions: ${error.message}`);
   }
 }
 
@@ -90,52 +200,141 @@ async function mintAndTransferTokens(recipientAddress, amount, assetId) {
   }
 
   try {
-    // Get account info for nonce
+    // Step 1: Check wallet balance
+    console.log('=== Checking Wallet Balance ===');
+    const balance = await getWalletBalance();
+    console.log(`Wallet: ${balance.address}`);
+    console.log(`Free balance: ${balance.freeFormatted} ${balance.tokenSymbol}`);
+    console.log(`Total balance: ${balance.total} (${balance.freeFormatted} ${balance.tokenSymbol} available)`);
+
+    // Check if balance is too low (less than 0.001 in native tokens - rough estimate for fees)
+    const minBalanceForFees = new BN(10).pow(new BN(balance.decimals - 3)); // 0.001 in smallest units
+    if (new BN(balance.free).lt(minBalanceForFees)) {
+      throw new Error(
+        `Insufficient balance for transaction fees. ` +
+        `Current balance: ${balance.freeFormatted} ${balance.tokenSymbol}. ` +
+        `Required: ~0.001 ${balance.tokenSymbol} for fees. ` +
+        `Please fund your wallet address: ${balance.address}`
+      );
+    }
+
+    // Step 2: Check asset permissions
+    console.log('=== Checking Asset Permissions ===');
+    const assetCheck = await checkAssetPermissions(assetId);
+    
+    if (!assetCheck.exists) {
+      throw new Error(`Asset ${assetId} does not exist on Asset Hub. ${assetCheck.error}`);
+    }
+
+    if (!assetCheck.canMint) {
+      throw new Error(
+        `Permission denied: Cannot mint asset ${assetId}. ` +
+        `Signer address: ${assetCheck.signerAddress}. ` +
+        `Asset issuer: ${assetCheck.issuer}. ` +
+        `Asset admin: ${assetCheck.admin}. ` +
+        `Only the issuer or admin can mint tokens.`
+      );
+    }
+
+    if (assetCheck.metadata) {
+      console.log(`Asset ${assetId}: ${assetCheck.metadata.name} (${assetCheck.metadata.symbol})`);
+      console.log(`Decimals: ${assetCheck.metadata.decimals}`);
+    }
+    console.log(`✓ Signer has permission to mint (${assetCheck.isIssuer ? 'Issuer' : 'Admin'})`);
+
+    // Step 3: Get account info for nonce
     const accountInfo = await api.query.system.account(wallet.address);
     const nonce = accountInfo.nonce;
 
-    console.log(`Constructing mint transaction: Asset ${assetId}, Amount: ${amount.toString()}, Recipient: ${recipientAddress}`);
+    // Step 4: Construct and send transaction
+    console.log('=== Constructing Mint Transaction ===');
+    console.log(`Asset ID: ${assetId}`);
+    console.log(`Amount: ${amount.toString()} (smallest units)`);
+    console.log(`Recipient: ${recipientAddress}`);
+    console.log(`Nonce: ${nonce.toString()}`);
 
     // Construct transaction: assets.mint(assetId, recipientAddress, amount)
     const tx = api.tx.assets.mint(assetId, recipientAddress, amount);
 
+    // Estimate transaction fee (optional, for logging)
+    try {
+      const paymentInfo = await tx.paymentInfo(wallet.address);
+      const fee = paymentInfo.partialFee;
+      const feeFormatted = fee.div(new BN(10).pow(new BN(balance.decimals))).toString();
+      console.log(`Estimated transaction fee: ${feeFormatted} ${balance.tokenSymbol}`);
+    } catch (e) {
+      // Fee estimation failed, that's okay
+      console.log('Could not estimate transaction fee');
+    }
+
     // Sign and send transaction
     return new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
-        reject(new Error('Transaction timeout: Transaction not confirmed within 60 seconds'));
+        reject(new Error(
+          'Transaction timeout: Transaction not confirmed within 60 seconds. ' +
+          `This may indicate network issues or the transaction is still pending. ` +
+          `Check your wallet balance and network connection.`
+        ));
       }, 60000); // 60 second timeout
 
+      console.log('=== Sending Transaction ===');
       tx.signAndSend(wallet, { nonce }, ({ status, txHash, events, dispatchError }) => {
         if (dispatchError) {
           clearTimeout(timeout);
+          let errorMessage = 'Transaction failed: ';
+          
           if (dispatchError.isModule) {
             const decoded = api.registry.findMetaError(dispatchError.asModule);
             const { name, section, docs } = decoded;
-            reject(new Error(`Transaction error: ${section}.${name}: ${docs.join(' ')}`));
+            errorMessage += `${section}.${name}`;
+            if (docs && docs.length > 0) {
+              errorMessage += `: ${docs.join(' ')}`;
+            }
+
+            // Add helpful context for common errors
+            if (name === 'InsufficientBalance' || name === 'BalanceLow') {
+              errorMessage += `. Your wallet balance may be too low. Current balance: ${balance.freeFormatted} ${balance.tokenSymbol}`;
+            } else if (name === 'NoPermission' || name === 'BadOrigin') {
+              errorMessage += `. You may not have permission to mint this asset. Check asset permissions.`;
+            } else if (name === 'Unknown') {
+              errorMessage += `. The asset may not exist or you may not have the required role.`;
+            }
           } else {
-            reject(new Error(`Transaction error: ${dispatchError.toString()}`));
+            errorMessage += dispatchError.toString();
           }
+
+          console.error('❌ Transaction Error:', errorMessage);
+          reject(new Error(errorMessage));
           return;
         }
 
         if (status.isInBlock || status.isFinalized) {
           clearTimeout(timeout);
-          console.log(`✓ Transaction ${txHash.toString()} included in block ${status.asInBlock?.toString() || status.asFinalized?.toString()}`);
+          const blockHash = status.asInBlock?.toString() || status.asFinalized?.toString();
+          console.log(`✓ Transaction ${txHash.toString()} included in block ${blockHash}`);
           
           // Log events
-          events.forEach(({ event }) => {
-            console.log(`  Event: ${event.section}.${event.method}`, event.data.toString());
-          });
+          if (events && events.length > 0) {
+            console.log('=== Transaction Events ===');
+            events.forEach(({ event }) => {
+              console.log(`  ${event.section}.${event.method}: ${event.data.toString()}`);
+            });
+          }
           
           resolve(txHash.toString());
+        } else if (status.isReady) {
+          console.log(`→ Transaction ${txHash.toString()} ready (broadcasting...)`);
+        } else if (status.isBroadcast) {
+          console.log(`→ Transaction ${txHash.toString()} broadcasted (in pool...)`);
         }
       }).catch((error) => {
         clearTimeout(timeout);
-        reject(error);
+        console.error('❌ Transaction send error:', error.message);
+        reject(new Error(`Failed to send transaction: ${error.message}`));
       });
     });
   } catch (error) {
-    console.error('Error in mintAndTransferTokens:', error);
+    console.error('❌ Error in mintAndTransferTokens:', error.message);
     throw error;
   }
 }
@@ -209,6 +408,8 @@ async function transferTokens(recipientAddress, amount, assetId) {
 
 module.exports = {
   initPolkadot,
+  getWalletBalance,
+  checkAssetPermissions,
   calculateTokenAmount,
   mintAndTransferTokens,
   transferTokens

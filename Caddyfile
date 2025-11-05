@@ -1,0 +1,4 @@
+forwarder.your-domain.com {
+  encode zstd gzip
+  reverse_proxy forwarder:5000
+}

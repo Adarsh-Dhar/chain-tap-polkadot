@@ -1,0 +1,19 @@
+[settings]
+provider = "podman"
+timeout = 1800
+
+[relaychain]
+chain = "rococo-local"
+image = "docker.io/parity/polkadot:v1.10.0"
+
+[[relaychain.nodes]]
+name = "alice"
+validator = true
+
+[[parachains]]
+id = 1000
+image = "docker.io/parity/asset-hub-rococo:v1.10.0"
+
+[[parachains.nodes]]
+name = "asset-hub-collator-01"
+collator = true

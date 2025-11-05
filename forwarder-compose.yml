@@ -1,0 +1,38 @@
+version: "3.8"
+
+services:
+  forwarder:
+    build:
+      context: ./my-phala-forwarder
+    container_name: phala-forwarder
+    environment:
+      - PHAT_FORWARD_TOKEN=replace-with-strong-shared-secret
+      - APP_API_BASE_URL=https://your-app-domain
+      - PHAT_CONTRACT_MNEMONIC=replace with your funded mnemonic
+      # Optional:
+      # - TOKEN_DECIMALS=12
+      # - POLKADOT_WS_URL=ws://localhost:9944
+      # - TOKENS_PER_ORDER=10
+      # - ASSET_HUB_ASSET_ID=1
+      - PORT=5000
+    expose:
+      - "5000"
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2
+    container_name: caddy
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - forwarder
+    restart: unless-stopped
+
+volumes:
+  caddy_data:
+  caddy_config:
