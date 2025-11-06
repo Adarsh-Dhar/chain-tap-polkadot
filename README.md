@@ -73,3 +73,12 @@ PHAT_ENDPOINT_URL=<Endpoint URL>/forward-order
 ```
 
 
+### Westend Asset Hub (Testnet)
+
+The forwarder connects by default to Westend Asset Hub via:
+
+```
+POLKADOT_WS_URL=wss://westend-asset-hub-rpc.polkadot.io
+```
+
+To create and manage assets permissionlessly on testnet, fund the signer (from `PHAT_CONTRACT_MNEMONIC` or `PHAT_CONTRACT_SEED`) with WND from a faucet to cover deposits/fees. You can override the endpoint by setting `POLKADOT_WS_URL` in your environment or compose file.

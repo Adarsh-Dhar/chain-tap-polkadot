@@ -16,9 +16,9 @@ async function initPolkadot() {
   }
 
   try {
-    // Connect to local network (can be localnet, testnet, or mainnet)
-    const wsUrl = process.env.POLKADOT_WS_URL || 'ws://localhost:9944';
-    console.log('Connecting to local network:', wsUrl);
+    // Connect to Westend Asset Hub testnet (override via POLKADOT_WS_URL if needed)
+    const wsUrl = process.env.POLKADOT_WS_URL || 'wss://westend-asset-hub-rpc.polkadot.io';
+    console.log('Connecting to Westend Asset Hub:', wsUrl);
     
     const wsProvider = new WsProvider(wsUrl);
     api = await ApiPromise.create({ provider: wsProvider });
@@ -26,7 +26,7 @@ async function initPolkadot() {
     // Wait for API to be ready
     await api.isReady;
     
-    // Initialize keyring
+    // Initialize keyring (Westend-compatible sr25519)
     keyring = new Keyring({ type: 'sr25519' });
     
     // Load Phat Contract's wallet from environment
@@ -43,7 +43,7 @@ async function initPolkadot() {
       wallet = keyring.addFromUri(seed);
     }
     
-    console.log('✓ Connected to local network');
+    console.log('✓ Connected to Westend Asset Hub');
     console.log('✓ Wallet address:', wallet.address);
     
     return api;

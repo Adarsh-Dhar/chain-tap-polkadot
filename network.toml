@@ -1,19 +1,22 @@
-[settings]
-provider = "podman"
-timeout = 1800
-
 [relaychain]
-chain = "rococo-local"
-image = "docker.io/parity/polkadot:v1.10.0"
+# Use the polkadot binary you just built
+default_command = "/path/to/your/polkadot-sdk/target/release/polkadot"
+chain = "rococo-local" # A built-in local relay spec
 
 [[relaychain.nodes]]
 name = "alice"
-validator = true
+
+[[relaychain.nodes]]
+name = "bob"
 
 [[parachains]]
-id = 1000
-image = "docker.io/parity/asset-hub-rococo:v1.10.0"
+id = 1000 # This is the standard testnet ID for Asset Hub
 
-[[parachains.nodes]]
-name = "asset-hub-collator-01"
-collator = true
+# Use the parachain binary you just built
+default_command = "/Users/adarsh/Documents/chainTap/polkadot-sdk/target/release/polkadot-parachain"
+
+# This is the key: tell the binary to run as a local Asset Hub
+chain = "asset-hub-rococo-local"
+
+[[parachains.collators]]
+name = "collator"

@@ -7,7 +7,7 @@ let wallet = null;
 
 async function ensureApi() {
   if (api) return api;
-  const wsUrl = process.env.POLKADOT_WS_URL || 'ws://localhost:9944';
+  const wsUrl = process.env.POLKADOT_WS_URL || 'wss://westend-asset-hub-rpc.polkadot.io';
   const provider = new WsProvider(wsUrl);
   api = await ApiPromise.create({ provider });
   await api.isReady;
@@ -24,7 +24,7 @@ async function createAssetIfMissing(desiredAssetId, metadata) {
   // This is a best-effort helper; ensure your signer has sufficient permissions.
   const { name = 'Loyalty Token', symbol = 'LOYAL', decimals = 12, minBalance = 1 } = metadata || {};
 
-  // Feature detection: ensure Assets pallet exists on this chain
+  // Feature detection: ensure Assets pallet exists on this chain (Westend Asset Hub exposes pallet-assets)
   const hasAssetsPallet = !!(api.query?.assets && (api.query.assets.asset || api.query.assets.assets));
   if (!hasAssetsPallet) {
     throw new Error(
@@ -167,12 +167,8 @@ async function createAssetIfMissing(desiredAssetId, metadata) {
     console.warn('Could not check balance:', e.message);
   }
   
-  // IMPORTANT: On Paseo Asset Hub (and most public Asset Hub chains),
-  // asset creation is restricted to governance or privileged accounts.
-  // Regular accounts cannot create assets programmatically.
-  // This is a chain-level restriction, not a code issue.
-  console.warn('⚠️  WARNING: Asset creation on public Asset Hub chains (like Paseo) typically requires governance approval.');
-  console.warn('⚠️  If this fails, you may need to use an existing asset or run a local dev chain.');
+  // Westend Asset Hub is permissionless for asset creation (requires refundable WND deposit).
+  // Users must fund the signer with WND from a faucet to cover deposits/fees.
 
   // Re-query nextAssetId right before creating transaction to avoid race conditions
   let finalAssetId = id;

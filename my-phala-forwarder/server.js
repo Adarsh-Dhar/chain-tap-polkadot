@@ -1,3 +1,6 @@
+// Load environment variables from .env file
+require('dotenv').config();
+
 const express = require('express');
 const { parseOrder, isValidWalletAddress } = require('./utils/orderParser');
 const { initPolkadot, mintAndTransferTokens, getWalletBalance, checkAssetPermissions } = require('./utils/blockchain');
