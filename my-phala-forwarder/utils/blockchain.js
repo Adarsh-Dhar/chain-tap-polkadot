@@ -406,11 +406,20 @@ async function transferTokens(recipientAddress, amount, assetId) {
   }
 }
 
+/**
+ * Get the current wallet instance
+ * @returns {object|null} - Wallet instance or null if not initialized
+ */
+function getWallet() {
+  return wallet;
+}
+
 module.exports = {
   initPolkadot,
   getWalletBalance,
   checkAssetPermissions,
   calculateTokenAmount,
   mintAndTransferTokens,
-  transferTokens
+  transferTokens,
+  getWallet
 };
