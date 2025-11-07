@@ -43,6 +43,20 @@ export async function PATCH(
     if (typeof body.assetId === "number") update.assetId = body.assetId
     if (typeof body.webhookUrl === "string") update.webhookUrl = body.webhookUrl
     if (typeof body.signerAddress === "string") update.signerAddress = body.signerAddress
+    if (typeof body.phalaEndpoint === "string") {
+      const trimmed = body.phalaEndpoint.trim()
+      if (trimmed.length) {
+        try {
+          const parsed = new URL(trimmed)
+          const normalized = parsed.toString().replace(/\/$/, "")
+          update.phalaEndpoint = normalized
+        } catch (error) {
+          return NextResponse.json({ error: "invalid phalaEndpoint" }, { status: 400 })
+        }
+      } else {
+        update.phalaEndpoint = ""
+      }
+    }
 
     const updated = await prisma.contract.update({ where: { id: contractId }, data: update })
     return NextResponse.json(updated)

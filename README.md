@@ -34,6 +34,21 @@ Use “Send test notification” to validate.
 
 See `docs/sample-shopify-order.json` for a sample `orders/create` payload including a Polkadot SS58 address in the `note` field.
 
+## MintHook Dashboard
+
+- Visit `/settings` to manage a single contract’s forwarder URL, token economics, and webhook metadata.
+- The page auto-detects the active contract (from the query string, local storage, or the first contract in the database).
+- Use the copy buttons to share the Shopify webhook URL or the hosted Phat forwarder URL with merchants.
+- `Send sample webhook` pushes the bundled example payload through the live bridge for a quick smoke test.
+
+### Rosie’s Roasters Example Flow
+
+1. Rosie signs in to MintHook, reviews the `BEAN-Token` (ID 1234) and copies the Shopify webhook URL.
+2. Alice places an order and pastes her wallet address into the order notes.
+3. Shopify calls MintHook’s `/api/shopify/webhook/{contractId}` endpoint.
+4. The hosted forwarder extracts the wallet, applies the “10 tokens per order” rule, and signs `Assets.mint(1234, Alice, 10)`.
+5. Alice opens her Polkadot wallet and sees 10 BEAN-Tokens credited instantly.
+
 ## Phala Cloud Forwarder
 
 This repo includes a minimal forwarder you can deploy to Phala Cloud:

@@ -27,3 +27,4 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 /lib/generated/prisma
+zombienet-macos-arm64

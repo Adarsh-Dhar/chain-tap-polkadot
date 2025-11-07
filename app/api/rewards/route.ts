@@ -25,10 +25,31 @@ export async function POST(req: Request) {
     if (!contractId || !orderId) {
       return NextResponse.json({ error: "contractId and orderId required" }, { status: 400 })
     }
+    const normalizedContractId = typeof contractId === "string" ? parseInt(contractId, 10) : contractId
+    const normalizedOrderId = typeof orderId === "string" ? orderId : String(orderId)
+    if (Number.isNaN(normalizedContractId)) {
+      return NextResponse.json({ error: "invalid contractId" }, { status: 400 })
+    }
     const reward = await prisma.orderReward.upsert({
-      where: { contractId_orderId: { contractId, orderId } },
-      create: { contractId, orderId, wallet: wallet || null, amount: amount || null, assetId: assetId || null, status: status || "pending", txHash: txHash || null, error: error || null },
-      update: { wallet: wallet || undefined, amount: amount || undefined, assetId: assetId || undefined, status: status || undefined, txHash: txHash || undefined, error: error || undefined },
+      where: { contractId_orderId: { contractId: normalizedContractId, orderId: normalizedOrderId } },
+      create: {
+        contractId: normalizedContractId,
+        orderId: normalizedOrderId,
+        wallet: wallet || null,
+        amount: amount || null,
+        assetId: assetId || null,
+        status: status || "pending",
+        txHash: txHash || null,
+        error: error || null,
+      },
+      update: {
+        wallet: wallet || undefined,
+        amount: amount || undefined,
+        assetId: assetId || undefined,
+        status: status || undefined,
+        txHash: txHash || undefined,
+        error: error || undefined,
+      },
     })
     return NextResponse.json(reward)
   } catch (e) {
