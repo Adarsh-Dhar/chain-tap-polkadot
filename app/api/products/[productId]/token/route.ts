@@ -10,7 +10,7 @@ export async function POST(
   try {
     const { productId } = await params
     const body = await req.json()
-    const { name, symbol } = body
+    const { name, symbol, productMetadata } = body
 
     if (!name || typeof name !== "string") {
       return NextResponse.json({ error: "name is required" }, { status: 400 })
@@ -21,7 +21,18 @@ export async function POST(
     }
 
     // Get phalaEndpoint from contracts
-    const { prisma } = await import("@/lib/prisma")
+    let prisma
+    try {
+      const prismaModule = await import("@/lib/prisma")
+      prisma = prismaModule.prisma
+    } catch (prismaError) {
+      console.error("Error importing Prisma:", prismaError)
+      return NextResponse.json(
+        { error: "Database connection error" },
+        { status: 500 }
+      )
+    }
+
     const contracts = await prisma.contract.findMany({
       orderBy: { id: "asc" },
       take: 1,
@@ -62,11 +73,66 @@ export async function POST(
     }
 
     const data = await response.json()
+    const assetId = data?.assetId || data?.id // Try both assetId and id
+
+    // Store product metadata in database (non-blocking)
+    if (productMetadata && assetId) {
+      try {
+        // Safely check if productToken model exists in Prisma client
+        const productTokenModel = (prisma as any).productToken
+        if (productTokenModel) {
+          await productTokenModel.upsert({
+            where: { productId: productMetadata.id },
+            create: {
+              productId: productMetadata.id,
+              assetId: assetId,
+              title: productMetadata.title,
+              handle: productMetadata.handle,
+              description: productMetadata.description || null,
+              vendor: productMetadata.vendor || null,
+              productType: productMetadata.productType || null,
+              tags: productMetadata.tags || [],
+              metadata: productMetadata as any, // Store full metadata as JSON
+            },
+            update: {
+              assetId: assetId,
+              title: productMetadata.title,
+              handle: productMetadata.handle,
+              description: productMetadata.description || null,
+              vendor: productMetadata.vendor || null,
+              productType: productMetadata.productType || null,
+              tags: productMetadata.tags || [],
+              metadata: productMetadata as any,
+            },
+          })
+          console.log("Product metadata stored successfully")
+        } else {
+          console.warn("ProductToken model not available in Prisma client. Run 'prisma generate' to update.")
+        }
+      } catch (dbError) {
+        console.error("Error storing product metadata:", dbError)
+        // Log the full error for debugging
+        if (dbError instanceof Error) {
+          console.error("Error message:", dbError.message)
+          console.error("Error stack:", dbError.stack)
+        }
+        // Don't fail the request if DB storage fails
+      }
+    }
+
     return NextResponse.json(data, { status: 201 })
   } catch (error) {
     console.error("Error creating token:", error)
+    // Log more details about the error
+    if (error instanceof Error) {
+      console.error("Error message:", error.message)
+      console.error("Error stack:", error.stack)
+    }
     return NextResponse.json(
-      { error: "Failed to create token" },
+      { 
+        error: "Failed to create token",
+        details: error instanceof Error ? error.message : "Unknown error"
+      },
       { status: 500 }
     )
   }

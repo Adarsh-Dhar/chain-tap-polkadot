@@ -45,3 +45,21 @@ model OrderReward {
   @@map("order_rewards")
 }
 
+model ProductToken {
+  id            Int      @id @default(autoincrement())
+  productId     String   // Shopify product ID (gid://shopify/Product/...)
+  assetId       Int?      // Polkadot Asset Hub token ID
+  title         String
+  handle        String
+  description   String?
+  vendor        String?
+  productType   String?
+  tags          String[]  @default([])
+  metadata      Json?     // Store full product metadata as JSON
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@unique([productId])
+  @@map("product_tokens")
+}
+

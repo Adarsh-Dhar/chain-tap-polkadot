@@ -233,7 +233,11 @@ export default function ProductsPage() {
         headers: {
           "content-type": "application/json",
         },
-        body: JSON.stringify({ name, symbol }),
+        body: JSON.stringify({ 
+          name, 
+          symbol,
+          productMetadata: product // Send full product object with all metadata
+        }),
       })
 
       if (!response.ok) {
