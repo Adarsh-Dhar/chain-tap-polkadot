@@ -124,6 +124,7 @@ export default function ProductsPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [creatingTokens, setCreatingTokens] = useState<Set<string>>(new Set())
+  const [productTokens, setProductTokens] = useState<Map<string, number>>(new Map()) // productId -> assetId
 
   useEffect(() => {
     async function fetchProducts() {
@@ -167,7 +168,33 @@ export default function ProductsPage() {
       }
     }
 
+    async function fetchProductTokens() {
+      try {
+        // Fetch existing product tokens from database
+        const response = await fetch("/api/products/tokens")
+        if (response.ok) {
+          const tokens = await response.json()
+          console.log("Fetched product tokens:", tokens)
+          const tokenMap = new Map<string, number>()
+          tokens.forEach((token: { productId: string; assetId: number | null }) => {
+            if (token.assetId) {
+              tokenMap.set(token.productId, token.assetId)
+              console.log(`Mapped token: ${token.productId} -> ${token.assetId}`)
+            }
+          })
+          setProductTokens(tokenMap)
+          console.log("Product tokens map size:", tokenMap.size)
+        } else {
+          console.error("Failed to fetch product tokens:", response.status, response.statusText)
+        }
+      } catch (err) {
+        console.error("Error fetching product tokens:", err)
+        // Don't fail if we can't fetch tokens
+      }
+    }
+
     fetchProducts()
+    fetchProductTokens()
   }, [])
 
   const handleCreateToken = async (product: Product) => {
@@ -242,11 +269,37 @@ export default function ProductsPage() {
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}))
+        
+        // Handle case where token already exists
+        if (response.status === 409 && errorData.existing) {
+          // Token already exists, update local state
+          if (errorData.assetId) {
+            setProductTokens((prev) => {
+              const next = new Map(prev)
+              next.set(product.id, errorData.assetId)
+              return next
+            })
+          }
+          alert(`Token already exists for this product! Asset ID: ${errorData.assetId || "N/A"}`)
+          return
+        }
+        
         throw new Error(errorData.error || `Failed to create token: ${response.statusText}`)
       }
 
       const data = await response.json()
-      alert(`Token created successfully! Asset ID: ${data.assetId || "N/A"}`)
+      const assetId = data?.assetId || data?.id
+      
+      // Update local state with new token
+      if (assetId) {
+        setProductTokens((prev) => {
+          const next = new Map(prev)
+          next.set(product.id, assetId)
+          return next
+        })
+      }
+      
+      alert(`Token created successfully! Asset ID: ${assetId || "N/A"}`)
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : "Failed to create token"
       alert(`Error: ${errorMessage}`)
@@ -310,25 +363,42 @@ export default function ProductsPage() {
                     <p className="text-xs font-mono text-muted-foreground">
                       ID: <span className="text-foreground">{product.id.split("/").pop()}</span>
                     </p>
-                    <Button
-                      onClick={() => handleCreateToken(product)}
-                      disabled={creatingTokens.has(product.id)}
-                      className="w-full"
-                      variant="outline"
-                      size="sm"
-                    >
-                      {creatingTokens.has(product.id) ? (
-                        <>
-                          <Loader2 className="h-4 w-4 animate-spin" />
-                          Creating Token...
-                        </>
-                      ) : (
-                        <>
+                    {(() => {
+                      const hasToken = productTokens.has(product.id)
+                      const assetId = productTokens.get(product.id)
+                      console.log(`Product ${product.id}: hasToken=${hasToken}, assetId=${assetId}`)
+                      return hasToken ? (
+                        <Button
+                          disabled
+                          className="w-full"
+                          variant="secondary"
+                          size="sm"
+                        >
                           <Coins className="h-4 w-4" />
-                          Create Token
-                        </>
-                      )}
-                    </Button>
+                          Token Created (ID: {assetId})
+                        </Button>
+                      ) : (
+                      <Button
+                        onClick={() => handleCreateToken(product)}
+                        disabled={creatingTokens.has(product.id)}
+                        className="w-full"
+                        variant="outline"
+                        size="sm"
+                      >
+                        {creatingTokens.has(product.id) ? (
+                          <>
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                            Creating Token...
+                          </>
+                        ) : (
+                          <>
+                            <Coins className="h-4 w-4" />
+                            Create Token
+                          </>
+                        )}
+                      </Button>
+                      )
+                    })()}
                   </div>
                 </CardContent>
               </Card>

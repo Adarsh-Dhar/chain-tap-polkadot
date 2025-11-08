@@ -48,7 +48,7 @@ model OrderReward {
 model ProductToken {
   id            Int      @id @default(autoincrement())
   productId     String   // Shopify product ID (gid://shopify/Product/...)
-  assetId       Int?      // Polkadot Asset Hub token ID
+  assetId       Int?      @unique // Polkadot Asset Hub token ID (unique to prevent duplicates)
   title         String
   handle        String
   description   String?

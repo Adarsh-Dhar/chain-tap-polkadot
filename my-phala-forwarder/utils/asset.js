@@ -62,11 +62,15 @@ async function findNextAvailableAssetId(startId, maxAttempts = 100) {
 async function createAssetIfMissing(desiredAssetId, metadata) {
   const api = await ensureApi();
   // Ensure we're using the shared wallet from blockchain.js
+  // Don't update local reference - use the one from ensureApi
   const sharedWallet = getWallet();
   if (!sharedWallet) {
     throw new Error('Wallet not initialized. Call initPolkadot() first.');
   }
-  wallet = sharedWallet; // Update local reference
+  // Use the shared wallet directly, don't reassign
+  if (!wallet || wallet.address !== sharedWallet.address) {
+    wallet = sharedWallet;
+  }
   // Note: depending on runtime, assets may be created via assets.create or assets.createAsset
   // This is a best-effort helper; ensure your signer has sufficient permissions.
   const { name = 'Loyalty Token', symbol = 'LOYAL', decimals = 12, minBalance = 1 } = metadata || {};
@@ -405,22 +409,72 @@ async function createAssetIfMissing(desiredAssetId, metadata) {
   // Log what we're about to do
   console.log(`Attempting to create asset ${assetIdForTx}: ${name} (${symbol})`);
   
+  // Ensure wallet is properly set - use the one from ensureApi
+  if (!wallet) {
+    const currentWallet = getWallet();
+    if (!currentWallet) {
+      throw new Error('Wallet not available');
+    }
+    wallet = currentWallet;
+  }
+  
+  // Verify API is ready
+  await api.isReady;
+  
+  // Query nonce BEFORE constructing Promise (same pattern as minting)
+  const accountInfo = await api.query.system.account(wallet.address);
+  const nonce = accountInfo.nonce;
+  console.log(`Account nonce: ${nonce.toString()}`);
+  console.log(`Wallet address: ${wallet.address}`);
+  
+  // Construct transaction (same pattern as minting - outside Promise)
+  let tx;
+  if (api.tx.assets?.create) {
+    tx = api.tx.assets.create(assetIdForTx, wallet.address, minBalance);
+  } else if (api.tx.assets?.createAsset) {
+    tx = api.tx.assets.createAsset(assetIdForTx, wallet.address, minBalance);
+  } else {
+    throw new Error('No asset creation extrinsics available');
+  }
+  
+  console.log(`Transaction method: ${tx.method.section}.${tx.method.method}`);
+  console.log(`Transaction args:`, tx.args.map((arg) => arg.toString()));
+  
   // On Paseo Asset Hub, asset creation might require special permissions
   // Try creating the asset first without metadata to isolate the issue
   // If that works, we can set metadata in a follow-up transaction
   console.log('Step 1: Creating asset (without metadata first)...');
   
   await new Promise((resolve, reject) => {
-    const timeout = setTimeout(() => {
-      reject(new Error('Asset creation transaction timeout after 60 seconds'));
-    }, 60000);
-
-    // Use just the create transaction first (no batch, no metadata)
-    const tx = createTx;
+    let transactionHash = null;
+    let transactionSubmitted = false;
     
+    const timeout = setTimeout(() => {
+      if (transactionSubmitted && transactionHash) {
+        // Transaction was submitted but not confirmed in time
+        console.warn(`⚠️  Transaction ${transactionHash} was submitted but not confirmed within timeout. It may still be processing.`);
+        // Check if asset was actually created despite timeout
+        // For now, resolve to allow the process to continue
+        resolve();
+      } else {
+        reject(new Error('Asset creation transaction timeout after 120 seconds. The transaction may not have been submitted.'));
+      }
+    }, 120000); // Increased to 120 seconds for asset creation
+
     console.log(`Sending create transaction with asset ID: ${assetIdForTx}`);
 
-    tx.signAndSend(wallet, ({ status, txHash, dispatchError, events }) => {
+    // Use explicit nonce (same pattern as minting code which works)
+    // Use wallet from getWallet() to ensure we're using the exact same instance as minting
+    const signingWallet = getWallet() || wallet;
+    console.log(`Signing with wallet: ${signingWallet.address}`);
+    tx.signAndSend(signingWallet, { nonce }, ({ status, txHash, dispatchError, events }) => {
+      // Capture txHash as soon as we get it
+      if (txHash && !transactionHash) {
+        transactionHash = txHash.toString();
+        transactionSubmitted = true;
+        console.log(`Transaction submitted with hash: ${transactionHash}`);
+      }
+
       if (dispatchError) {
         clearTimeout(timeout);
         let errorMessage = 'Asset creation failed: ';
@@ -458,7 +512,11 @@ async function createAssetIfMissing(desiredAssetId, metadata) {
 
       if (status.isInBlock || status.isFinalized) {
         clearTimeout(timeout);
-        const blockHash = status.asInBlock?.toString() || status.asFinalized?.toString();
+        const blockHash = status.isInBlock 
+          ? status.asInBlock.toString() 
+          : status.isFinalized 
+            ? status.asFinalized.toString() 
+            : 'unknown';
         console.log(`✓ Asset creation transaction ${txHash.toString()} included in block ${blockHash}`);
         
         if (events && events.length > 0) {
@@ -486,15 +544,16 @@ async function createAssetIfMissing(desiredAssetId, metadata) {
               : metadataTxs[0];
             
             // Set metadata asynchronously (don't wait for it)
+            // Let API handle nonce automatically
             metadataTx.signAndSend(wallet, ({ status, dispatchError }) => {
-              if (dispatchError) {
-                console.warn('⚠️  Failed to set asset metadata:', dispatchError.toString());
-              } else if (status.isInBlock || status.isFinalized) {
-                console.log('✓ Asset metadata set successfully');
-              }
-            }).catch(e => {
-              console.warn('⚠️  Error setting metadata:', e.message);
-            });
+                if (dispatchError) {
+                  console.warn('⚠️  Failed to set asset metadata:', dispatchError.toString());
+                } else if (status.isInBlock || status.isFinalized) {
+                  console.log('✓ Asset metadata set successfully');
+                }
+              }).catch(e => {
+                console.warn('⚠️  Error setting metadata:', e.message);
+              });
           }
         }
         
