@@ -2,14 +2,55 @@
 
 import PageHeader from "@/components/page-header"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Button } from "@/components/ui/button"
 import { useEffect, useState } from "react"
-import { Loader2, Package } from "lucide-react"
+import { Loader2, Package, Coins } from "lucide-react"
 
 type Product = {
   id: string
   title: string
   handle: string
   description: string
+  vendor?: string
+  productType?: string
+  tags?: string[]
+  status?: string
+  createdAt?: string
+  updatedAt?: string
+  totalInventory?: number
+  priceRangeV2?: {
+    minVariantPrice: {
+      amount: string
+      currencyCode: string
+    }
+    maxVariantPrice: {
+      amount: string
+      currencyCode: string
+    }
+  }
+  images?: {
+    edges: Array<{
+      node: {
+        id: string
+        url: string
+        altText?: string
+        width?: number
+        height?: number
+      }
+    }>
+  }
+  variants?: {
+    edges: Array<{
+      node: {
+        id: string
+        title: string
+        price: string
+        sku?: string
+        inventoryQuantity?: number
+        availableForSale?: boolean
+      }
+    }>
+  }
 }
 
 type ProductsResponse = {
@@ -32,6 +73,46 @@ const PRODUCTS_QUERY = `
           title
           handle
           description
+          vendor
+          productType
+          tags
+          status
+          createdAt
+          updatedAt
+          totalInventory
+          priceRangeV2 {
+            minVariantPrice {
+              amount
+              currencyCode
+            }
+            maxVariantPrice {
+              amount
+              currencyCode
+            }
+          }
+          images(first: 3) {
+            edges {
+              node {
+                id
+                url
+                altText
+                width
+                height
+              }
+            }
+          }
+          variants(first: 5) {
+            edges {
+              node {
+                id
+                title
+                price
+                sku
+                inventoryQuantity
+                availableForSale
+              }
+            }
+          }
         }
       }
     }
@@ -42,6 +123,7 @@ export default function ProductsPage() {
   const [products, setProducts] = useState<Product[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [creatingTokens, setCreatingTokens] = useState<Set<string>>(new Set())
 
   useEffect(() => {
     async function fetchProducts() {
@@ -66,6 +148,7 @@ export default function ProductsPage() {
         const data: ProductsResponse = await response.json()
 
         if (data.errors && data.errors.length > 0) {
+          console.error("GraphQL Errors:", data.errors)
           throw new Error(data.errors[0].message)
         }
 
@@ -86,6 +169,92 @@ export default function ProductsPage() {
 
     fetchProducts()
   }, [])
+
+  const handleCreateToken = async (product: Product) => {
+    // Log all product details (only fields with values)
+    console.log("=== Product Details ===")
+    
+    // Always log basic fields
+    console.log("Product ID:", product.id)
+    console.log("Title:", product.title)
+    console.log("Handle:", product.handle)
+    if (product.description) console.log("Description:", product.description)
+    
+    // Log optional fields only if they have values
+    if (product.vendor) console.log("Vendor:", product.vendor)
+    if (product.productType) console.log("Product Type:", product.productType)
+    if (product.tags && product.tags.length > 0) console.log("Tags:", product.tags)
+    if (product.status) console.log("Status:", product.status)
+    if (product.createdAt) console.log("Created At:", product.createdAt)
+    if (product.updatedAt) console.log("Updated At:", product.updatedAt)
+    if (product.totalInventory !== undefined && product.totalInventory !== null) {
+      console.log("Total Inventory:", product.totalInventory)
+    }
+    if (product.priceRangeV2) {
+      console.log("Price Range:", {
+        min: `${product.priceRangeV2.minVariantPrice.amount} ${product.priceRangeV2.minVariantPrice.currencyCode}`,
+        max: `${product.priceRangeV2.maxVariantPrice.amount} ${product.priceRangeV2.maxVariantPrice.currencyCode}`
+      })
+    }
+    if (product.images && product.images.edges.length > 0) {
+      console.log("Images:", product.images.edges.map(e => ({
+        url: e.node.url,
+        altText: e.node.altText,
+        dimensions: e.node.width && e.node.height ? `${e.node.width}x${e.node.height}` : undefined
+      })))
+    }
+    if (product.variants && product.variants.edges.length > 0) {
+      console.log("Variants:", product.variants.edges.map(e => ({
+        title: e.node.title,
+        price: e.node.price,
+        sku: e.node.sku,
+        inventory: e.node.inventoryQuantity,
+        available: e.node.availableForSale
+      })))
+    }
+    
+    // Log full product object for debugging
+    console.log("Full Product Object:", JSON.stringify(product, null, 2))
+    console.log("======================")
+
+    setCreatingTokens((prev) => new Set(prev).add(product.id))
+
+    try {
+      // Generate token name and symbol from product
+      const name = `${product.title} Token`
+      const symbol = product.title
+        .replace(/[^A-Za-z0-9]/g, "")
+        .slice(0, 6)
+        .toUpperCase() || "TOKEN"
+
+      const productId = product.id.split("/").pop() || product.id
+      const response = await fetch(`/api/products/${productId}/token`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ name, symbol }),
+      })
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}))
+        throw new Error(errorData.error || `Failed to create token: ${response.statusText}`)
+      }
+
+      const data = await response.json()
+      alert(`Token created successfully! Asset ID: ${data.assetId || "N/A"}`)
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : "Failed to create token"
+      alert(`Error: ${errorMessage}`)
+      console.error("Error creating token:", err)
+    } finally {
+      setCreatingTokens((prev) => {
+        const next = new Set(prev)
+        next.delete(product.id)
+        return next
+      })
+    }
+  }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-background to-secondary">
@@ -133,10 +302,29 @@ export default function ProductsPage() {
                   <p className="text-sm text-muted-foreground line-clamp-3">
                     {product.description || "No description available"}
                   </p>
-                  <div className="mt-4 pt-4 border-t border-border">
+                  <div className="mt-4 pt-4 border-t border-border space-y-3">
                     <p className="text-xs font-mono text-muted-foreground">
                       ID: <span className="text-foreground">{product.id.split("/").pop()}</span>
                     </p>
+                    <Button
+                      onClick={() => handleCreateToken(product)}
+                      disabled={creatingTokens.has(product.id)}
+                      className="w-full"
+                      variant="outline"
+                      size="sm"
+                    >
+                      {creatingTokens.has(product.id) ? (
+                        <>
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                          Creating Token...
+                        </>
+                      ) : (
+                        <>
+                          <Coins className="h-4 w-4" />
+                          Create Token
+                        </>
+                      )}
+                    </Button>
                   </div>
                 </CardContent>
               </Card>
