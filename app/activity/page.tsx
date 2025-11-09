@@ -1,6 +1,7 @@
 "use client"
 
 import PageHeader from "@/components/page-header"
+import { ConnectWalletButton } from "@/components/connect-wallet-button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { useEffect, useMemo, useRef, useState } from "react"
 
@@ -72,7 +73,11 @@ export default function ActivityPage() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-background to-secondary">
-      <PageHeader title="Activity" description="Recent mints and webhook processing" />
+      <PageHeader 
+        title="Activity" 
+        description="Recent mints and webhook processing"
+        actions={<ConnectWalletButton />}
+      />
 
       <div className="max-w-7xl mx-auto px-6 py-8">
         <Card>

@@ -414,6 +414,65 @@ function getWallet() {
   return wallet;
 }
 
+/**
+ * Get asset account balance for a specific address
+ * @param {number} assetId - Asset ID to check
+ * @param {string} address - Address to check balance for
+ * @returns {Promise<object>} - Balance info with raw and formatted amounts
+ */
+async function getAssetAccountBalance(assetId, address) {
+  if (!api) {
+    await initPolkadot();
+  }
+
+  try {
+    // Query asset account balance
+    const accountInfo = await api.query.assets.account(assetId, address);
+    
+    if (accountInfo.isNone) {
+      return {
+        exists: false,
+        balance: '0',
+        balanceFormatted: '0',
+        address: address,
+        assetId: assetId
+      };
+    }
+
+    const account = accountInfo.unwrap();
+    const balance = account.balance;
+
+    // Get asset metadata for decimals
+    let decimals = 12; // Default
+    try {
+      const meta = await api.query.assets.metadata(assetId);
+      if (meta.isSome) {
+        const metaData = meta.unwrap();
+        decimals = metaData.decimals.toNumber();
+      }
+    } catch (e) {
+      // Use default if metadata query fails
+      console.warn('Could not fetch asset metadata, using default decimals:', e.message);
+    }
+
+    // Convert to human-readable format
+    const divisor = new BN(10).pow(new BN(decimals));
+    const balanceFormatted = balance.div(divisor).toString();
+
+    return {
+      exists: true,
+      balance: balance.toString(),
+      balanceFormatted: balanceFormatted,
+      address: address,
+      assetId: assetId,
+      decimals: decimals
+    };
+  } catch (error) {
+    console.error('Error fetching asset account balance:', error);
+    throw new Error(`Failed to fetch asset account balance: ${error.message}`);
+  }
+}
+
 module.exports = {
   initPolkadot,
   getWalletBalance,
@@ -421,5 +480,6 @@ module.exports = {
   calculateTokenAmount,
   mintAndTransferTokens,
   transferTokens,
-  getWallet
+  getWallet,
+  getAssetAccountBalance
 };

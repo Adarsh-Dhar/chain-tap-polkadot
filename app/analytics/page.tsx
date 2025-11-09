@@ -1,6 +1,7 @@
 "use client"
 
 import PageHeader from "@/components/page-header"
+import { ConnectWalletButton } from "@/components/connect-wallet-button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 
 const stats = [
@@ -13,7 +14,11 @@ const stats = [
 export default function AnalyticsPage() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-background to-secondary">
-      <PageHeader title="Analytics" description="Performance metrics and insights" />
+      <PageHeader 
+        title="Analytics" 
+        description="Performance metrics and insights"
+        actions={<ConnectWalletButton />}
+      />
 
       <div className="max-w-7xl mx-auto px-6 py-8">
         <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4">

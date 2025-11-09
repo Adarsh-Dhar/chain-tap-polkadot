@@ -1,6 +1,7 @@
 "use client"
 
 import PageHeader from "@/components/page-header"
+import { ConnectWalletButton } from "@/components/connect-wallet-button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -51,7 +52,11 @@ export default function IntegrationsPage() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-background to-secondary">
-      <PageHeader title="Integrations" description="Create a reward contract and connect Shopify" />
+      <PageHeader 
+        title="Integrations" 
+        description="Create a reward contract and connect Shopify"
+        actions={<ConnectWalletButton />}
+      />
 
       <div className="max-w-3xl mx-auto px-6 py-8">
         <Card className="hover:shadow-lg transition-shadow">

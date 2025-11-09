@@ -4,6 +4,7 @@ import { Geist, Geist_Mono } from "next/font/google"
 import "./globals.css"
 import AppSidebar from "@/components/app-sidebar"
 import { SidebarProvider } from "@/components/ui/sidebar"
+import { WalletProvider } from "@/components/wallet-provider"
 
 const _geist = Geist({ subsets: ["latin"] })
 const _geistMono = Geist_Mono({ subsets: ["latin"] })
@@ -22,10 +23,12 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <body className={`font-sans antialiased`}>
-        <SidebarProvider>
-          <AppSidebar />
-          <main className="w-full">{children}</main>
-        </SidebarProvider>
+        <WalletProvider>
+          <SidebarProvider>
+            <AppSidebar />
+            <main className="w-full">{children}</main>
+          </SidebarProvider>
+        </WalletProvider>
       </body>
     </html>
   )

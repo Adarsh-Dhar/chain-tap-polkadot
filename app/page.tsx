@@ -3,11 +3,16 @@ import StatusIndicator from "@/components/status-indicator"
 import EndpointCard from "@/components/endpoint-card"
 import TokenConfigCard from "@/components/token-config-card"
 import ActivityLogCard from "@/components/activity-log-card"
+import { ConnectWalletButton } from "@/components/connect-wallet-button"
 
 export default function DashboardPage() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-background to-secondary">
-      <PageHeader title="Dashboard" description="Manage your Web2-to-Web3 loyalty bridge" />
+      <PageHeader 
+        title="Dashboard" 
+        description="Manage your Web2-to-Web3 loyalty bridge"
+        actions={<ConnectWalletButton />}
+      />
 
       <div className="max-w-7xl mx-auto px-6 py-8">
         <div className="mb-8">

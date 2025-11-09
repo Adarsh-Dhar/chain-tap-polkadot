@@ -1,6 +1,7 @@
 "use client"
 
 import PageHeader from "@/components/page-header"
+import { ConnectWalletButton } from "@/components/connect-wallet-button"
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -294,7 +295,11 @@ export default function SettingsPage() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-background to-secondary pb-16">
-      <PageHeader title="MintHook Settings" description="Configure how Shopify orders bridge into your loyalty token." />
+      <PageHeader 
+        title="MintHook Settings" 
+        description="Configure how Shopify orders bridge into your loyalty token."
+        actions={<ConnectWalletButton />}
+      />
 
       <div className="max-w-5xl mx-auto px-6 py-8 space-y-8">
         <Card className="hover:shadow-lg transition-shadow">

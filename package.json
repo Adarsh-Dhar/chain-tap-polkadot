@@ -11,6 +11,7 @@
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",
     "@open-web3/parachain-launch": "^2.0.0",
+    "@polkadot/extension-dapp": "^0.62.3",
     "@prisma/client": "6.11.0",
     "@radix-ui/react-accordion": "1.2.2",
     "@radix-ui/react-alert-dialog": "1.1.4",

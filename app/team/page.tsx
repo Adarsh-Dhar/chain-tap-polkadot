@@ -1,6 +1,7 @@
 "use client"
 
 import PageHeader from "@/components/page-header"
+import { ConnectWalletButton } from "@/components/connect-wallet-button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -29,7 +30,11 @@ const teamMembers = [
 export default function TeamPage() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-background to-secondary">
-      <PageHeader title="Team" description="Manage team members and permissions" />
+      <PageHeader 
+        title="Team" 
+        description="Manage team members and permissions"
+        actions={<ConnectWalletButton />}
+      />
 
       <div className="max-w-7xl mx-auto px-6 py-8">
         <div className="flex justify-end mb-6">

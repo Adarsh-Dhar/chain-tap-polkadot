@@ -3,7 +3,7 @@ require('dotenv').config();
 
 const express = require('express');
 const { parseOrder, isValidWalletAddress } = require('./utils/orderParser');
-const { initPolkadot, mintAndTransferTokens, getWalletBalance, checkAssetPermissions } = require('./utils/blockchain');
+const { initPolkadot, mintAndTransferTokens, getWalletBalance, checkAssetPermissions, getAssetAccountBalance } = require('./utils/blockchain');
 const { createAssetIfMissing, getSignerAddress } = require('./utils/asset');
 const fetch = require('node-fetch');
 
@@ -54,6 +54,38 @@ app.get('/asset/:assetId/permissions', async (req, res) => {
     return res.status(200).json({ status: 'success', ...permissions });
   } catch (e) {
     console.error('Asset permission check error:', e);
+    return res.status(500).json({ status: 'error', message: e.message });
+  }
+});
+
+// Get asset account balance endpoint
+app.get('/asset/:assetId/balance/:address', async (req, res) => {
+  const receivedToken = req.headers['x-forward-token'];
+  if (!PHAT_FORWARD_TOKEN || receivedToken !== PHAT_FORWARD_TOKEN) {
+    console.error('Unauthorized: Token mismatch', {
+      hasEnvToken: !!PHAT_FORWARD_TOKEN,
+      receivedTokenLength: receivedToken?.length,
+      envTokenLength: PHAT_FORWARD_TOKEN?.length
+    });
+    return res.status(401).json({ status: 'error', message: 'Unauthorized' });
+  }
+  try {
+    const assetId = parseInt(req.params.assetId, 10);
+    const address = req.params.address;
+    
+    if (isNaN(assetId)) {
+      return res.status(400).json({ status: 'error', message: 'Invalid asset ID' });
+    }
+    
+    if (!address || typeof address !== 'string') {
+      return res.status(400).json({ status: 'error', message: 'Invalid address' });
+    }
+    
+    await initPolkadot();
+    const balance = await getAssetAccountBalance(assetId, address);
+    return res.status(200).json({ status: 'success', ...balance });
+  } catch (e) {
+    console.error('Asset balance check error:', e);
     return res.status(500).json({ status: 'error', message: e.message });
   }
 });

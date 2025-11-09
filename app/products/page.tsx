@@ -1,10 +1,11 @@
 "use client"
 
 import PageHeader from "@/components/page-header"
+import { ConnectWalletButton } from "@/components/connect-wallet-button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { useEffect, useState } from "react"
-import { Loader2, Package, Coins } from "lucide-react"
+import { Loader2, Package, Coins, Eye } from "lucide-react"
 
 type Product = {
   id: string
@@ -125,6 +126,7 @@ export default function ProductsPage() {
   const [error, setError] = useState<string | null>(null)
   const [creatingTokens, setCreatingTokens] = useState<Set<string>>(new Set())
   const [productTokens, setProductTokens] = useState<Map<string, number>>(new Map()) // productId -> assetId
+  const [loadingBalances, setLoadingBalances] = useState<Set<string>>(new Set())
 
   useEffect(() => {
     async function fetchProducts() {
@@ -313,9 +315,57 @@ export default function ProductsPage() {
     }
   }
 
+  const handleShowAssets = async (product: Product) => {
+    const productId = product.id.split("/").pop() || product.id
+    setLoadingBalances((prev) => new Set(prev).add(product.id))
+
+    try {
+      const response = await fetch(`/api/products/${productId}/token/balance`)
+      
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}))
+        const errorMessage = errorData.error || `Failed to fetch balance: ${response.statusText}`
+        console.error(`Error fetching balance for product ${product.title}:`, errorMessage)
+        alert(`Error: ${errorMessage}`)
+        return
+      }
+
+      const data = await response.json()
+      
+      // Log the balance information
+      console.log("=== Asset Balance ===")
+      console.log(`Product: ${product.title}`)
+      console.log(`Product ID: ${product.id}`)
+      console.log(`Asset ID: ${data.assetId}`)
+      console.log(`Signer Address: ${data.address}`)
+      console.log(`Balance (raw): ${data.balance}`)
+      console.log(`Balance (formatted): ${data.balanceFormatted}`)
+      console.log(`Decimals: ${data.decimals || 'N/A'}`)
+      console.log(`Account exists: ${data.exists ? 'Yes' : 'No'}`)
+      console.log("=====================")
+      
+      // Also show an alert with the key info
+      alert(`Asset Balance for ${product.title}:\n\nAsset ID: ${data.assetId}\nBalance: ${data.balanceFormatted} tokens\nAddress: ${data.address}`)
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : "Failed to fetch balance"
+      console.error("Error fetching asset balance:", err)
+      alert(`Error: ${errorMessage}`)
+    } finally {
+      setLoadingBalances((prev) => {
+        const next = new Set(prev)
+        next.delete(product.id)
+        return next
+      })
+    }
+  }
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-background to-secondary">
-      <PageHeader title="Products" description="Browse your Shopify product catalog" />
+      <PageHeader 
+        title="Products" 
+        description="Browse your Shopify product catalog"
+        actions={<ConnectWalletButton />}
+      />
 
       <div className="max-w-7xl mx-auto px-6 py-8">
         {loading ? (
@@ -368,15 +418,36 @@ export default function ProductsPage() {
                       const assetId = productTokens.get(product.id)
                       console.log(`Product ${product.id}: hasToken=${hasToken}, assetId=${assetId}`)
                       return hasToken ? (
-                        <Button
-                          disabled
-                          className="w-full"
-                          variant="secondary"
-                          size="sm"
-                        >
-                          <Coins className="h-4 w-4" />
-                          Token Created (ID: {assetId})
-                        </Button>
+                        <div className="space-y-2">
+                          <Button
+                            disabled
+                            className="w-full"
+                            variant="secondary"
+                            size="sm"
+                          >
+                            <Coins className="h-4 w-4" />
+                            Token Created (ID: {assetId})
+                          </Button>
+                          <Button
+                            onClick={() => handleShowAssets(product)}
+                            disabled={loadingBalances.has(product.id)}
+                            className="w-full"
+                            variant="outline"
+                            size="sm"
+                          >
+                            {loadingBalances.has(product.id) ? (
+                              <>
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                                Loading...
+                              </>
+                            ) : (
+                              <>
+                                <Eye className="h-4 w-4" />
+                                Show Assets
+                              </>
+                            )}
+                          </Button>
+                        </div>
                       ) : (
                       <Button
                         onClick={() => handleCreateToken(product)}
