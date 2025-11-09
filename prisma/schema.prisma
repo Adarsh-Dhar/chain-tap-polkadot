@@ -69,7 +69,7 @@ model ShopifySession {
   accessToken       String    // Shopify access token
   scope             String    // granted scopes (comma-separated)
   expiresAt         DateTime? // token expiry (for online tokens)
-  associatedUserId  Int?      // Shopify user ID (for online tokens)
+  associatedUserId  BigInt?  // Shopify user ID (for online tokens) - using BigInt for large IDs
   associatedUserEmail String? // Shopify user email (for online tokens)
   isOnline          Boolean   @default(false) // online vs offline token
   createdAt         DateTime  @default(now())

@@ -1,0 +1,16 @@
+# Learn more about configuring your app at https://shopify.dev/docs/apps/tools/cli/configuration
+
+client_id = "a232ffe4c5abc442e37847d6d8754ebc"
+name = "adrs-2"
+application_url = "http://localhost:3000"
+embedded = true
+
+[webhooks]
+api_version = "2026-01"
+
+[access_scopes]
+# Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
+scopes = "read_products,write_products"
+
+[auth]
+redirect_urls = [ "http://localhost:3000/api/auth/callback" ]

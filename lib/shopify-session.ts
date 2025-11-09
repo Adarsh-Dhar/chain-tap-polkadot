@@ -6,7 +6,7 @@ export interface ShopifySessionData {
   accessToken: string
   scope: string
   expiresAt: Date | null
-  associatedUserId: number | null
+  associatedUserId: bigint | null
   associatedUserEmail: string | null
   isOnline: boolean
   createdAt: Date
@@ -136,17 +136,22 @@ export async function saveShopifySession(data: {
   accessToken: string
   scope: string
   expiresAt?: Date | null
-  associatedUserId?: number | null
+  associatedUserId?: number | bigint | null
   associatedUserEmail?: string | null
   isOnline: boolean
 }): Promise<ShopifySessionData> {
+  // Convert number to BigInt if provided
+  const associatedUserId = data.associatedUserId 
+    ? (typeof data.associatedUserId === 'bigint' ? data.associatedUserId : BigInt(data.associatedUserId))
+    : null
+
   const session = await prisma.shopifySession.upsert({
     where: { shop: data.shop },
     update: {
       accessToken: data.accessToken,
       scope: data.scope,
       expiresAt: data.expiresAt || null,
-      associatedUserId: data.associatedUserId || null,
+      associatedUserId: associatedUserId,
       associatedUserEmail: data.associatedUserEmail || null,
       isOnline: data.isOnline,
       updatedAt: new Date(),
@@ -156,7 +161,7 @@ export async function saveShopifySession(data: {
       accessToken: data.accessToken,
       scope: data.scope,
       expiresAt: data.expiresAt || null,
-      associatedUserId: data.associatedUserId || null,
+      associatedUserId: associatedUserId,
       associatedUserEmail: data.associatedUserEmail || null,
       isOnline: data.isOnline,
     },

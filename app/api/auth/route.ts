@@ -7,12 +7,31 @@ import {
   sanitizeShop,
 } from "@/lib/shopify-oauth"
 import { getShopifySession, isTokenExpired } from "@/lib/shopify-session"
+import fs from "fs"
+import path from "path"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
 
+// Read application_url from shopify.app.toml if not in env
+function getAppUrlFromToml(): string {
+  try {
+    const tomlPath = path.join(process.cwd(), "shopify.app.toml")
+    if (fs.existsSync(tomlPath)) {
+      const tomlContent = fs.readFileSync(tomlPath, "utf-8")
+      const appUrlMatch = tomlContent.match(/application_url\s*=\s*["']([^"']+)["']/)
+      if (appUrlMatch) {
+        return appUrlMatch[1]
+      }
+    }
+  } catch (error) {
+    console.error("Could not read application_url from shopify.app.toml:", error)
+  }
+  return ""
+}
+
 const SHOPIFY_CLIENT_SECRET = process.env.SHOPIFY_CLIENT_SECRET || ""
-const APP_URL = process.env.APP_URL || process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"
+const APP_URL = process.env.APP_URL || process.env.NEXT_PUBLIC_APP_URL || getAppUrlFromToml() || "http://localhost:3000"
 
 /**
  * OAuth Initiation Route
@@ -22,6 +41,37 @@ const APP_URL = process.env.APP_URL || process.env.NEXT_PUBLIC_APP_URL || "http:
 export async function GET(req: NextRequest) {
   console.error("📥 ========== OAuth Initiation Route Called ==========")
   console.error("Timestamp:", new Date().toISOString())
+  
+  // 🔍 LOG: Read shopify.app.toml configuration
+  try {
+    const tomlPath = path.join(process.cwd(), "shopify.app.toml")
+    if (fs.existsSync(tomlPath)) {
+      const tomlContent = fs.readFileSync(tomlPath, "utf-8")
+      console.error("🔍 ========== shopify.app.toml Configuration ==========")
+      console.error(tomlContent)
+      
+      // Extract application_url and redirect_urls
+      const appUrlMatch = tomlContent.match(/application_url\s*=\s*["']([^"']+)["']/)
+      const redirectUrlsMatch = tomlContent.match(/redirect_urls\s*=\s*\[([^\]]+)\]/)
+      
+      if (appUrlMatch) {
+        console.error("🔍 application_url from TOML:", appUrlMatch[1])
+      } else {
+        console.error("⚠️ application_url not found in TOML")
+      }
+      if (redirectUrlsMatch) {
+        console.error("🔍 redirect_urls from TOML:", redirectUrlsMatch[1])
+      } else {
+        console.error("⚠️ redirect_urls not found in TOML")
+      }
+      console.error("=====================================================")
+    } else {
+      console.error("⚠️ shopify.app.toml file not found at:", tomlPath)
+    }
+  } catch (error) {
+    console.error("⚠️ Could not read shopify.app.toml:", error)
+  }
+  
   try {
     const { searchParams } = new URL(req.url)
     const shop = searchParams.get("shop")
@@ -121,6 +171,16 @@ export async function GET(req: NextRequest) {
     await setNonceCookie(nonce)
 
     const redirectUri = `${APP_URL}/api/auth/callback`
+    
+    // 🔍 LOG: Configuration values before building auth URL
+    console.error("🔍 ========== OAuth Configuration ==========")
+    console.error("APP_URL (from env):", APP_URL)
+    console.error("process.env.APP_URL:", process.env.APP_URL || "NOT SET")
+    console.error("process.env.NEXT_PUBLIC_APP_URL:", process.env.NEXT_PUBLIC_APP_URL || "NOT SET")
+    console.error("Redirect URI (constructed):", redirectUri)
+    console.error("Shop:", shop)
+    console.error("============================================")
+    
     const authUrl = buildAuthUrl(shop, redirectUri, nonce, true) // true = online token
 
     return NextResponse.redirect(authUrl)

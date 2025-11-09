@@ -8,12 +8,31 @@ import {
   sanitizeShop,
 } from "@/lib/shopify-oauth"
 import { saveShopifySession } from "@/lib/shopify-session"
+import fs from "fs"
+import path from "path"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
 
+// Read application_url from shopify.app.toml if not in env
+function getAppUrlFromToml(): string {
+  try {
+    const tomlPath = path.join(process.cwd(), "shopify.app.toml")
+    if (fs.existsSync(tomlPath)) {
+      const tomlContent = fs.readFileSync(tomlPath, "utf-8")
+      const appUrlMatch = tomlContent.match(/application_url\s*=\s*["']([^"']+)["']/)
+      if (appUrlMatch) {
+        return appUrlMatch[1]
+      }
+    }
+  } catch (error) {
+    console.error("Could not read application_url from shopify.app.toml:", error)
+  }
+  return ""
+}
+
 const SHOPIFY_CLIENT_SECRET = process.env.SHOPIFY_CLIENT_SECRET || ""
-const APP_URL = process.env.APP_URL || process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"
+const APP_URL = process.env.APP_URL || process.env.NEXT_PUBLIC_APP_URL || getAppUrlFromToml() || "http://localhost:3000"
 
 /**
  * OAuth Callback Route
@@ -31,6 +50,9 @@ export async function GET(req: NextRequest) {
     const embedded = searchParams.get("embedded")
 
     console.log("📥 OAuth Callback - Parameters:", { code: code ? "present" : "missing", shop, host, embedded })
+    
+    // 🔍 LOG: Check if client secret is set
+    console.error("🔍 SHOPIFY_CLIENT_SECRET:", SHOPIFY_CLIENT_SECRET ? `${SHOPIFY_CLIENT_SECRET.substring(0, 10)}...` : "NOT SET")
 
     // Get nonce from cookie
     const expectedNonce = await getNonceCookie()
@@ -41,7 +63,9 @@ export async function GET(req: NextRequest) {
 
     // Step 3: Validate callback
     const queryParams = new URL(req.url).searchParams
+    console.error("🔍 Validating callback with HMAC...")
     const validation = validateCallback(queryParams, SHOPIFY_CLIENT_SECRET, expectedNonce)
+    console.error("🔍 Validation result:", validation.valid ? "VALID" : `INVALID: ${validation.error}`)
 
     if (!validation.valid || !validation.shop) {
       await clearNonceCookie()

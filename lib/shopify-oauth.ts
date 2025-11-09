@@ -1,10 +1,47 @@
 import crypto from "crypto"
 import { cookies } from "next/headers"
+import fs from "fs"
+import path from "path"
 
-const SHOPIFY_CLIENT_ID = process.env.SHOPIFY_CLIENT_ID || ""
+// Read client_id from shopify.app.toml if not in env
+function getClientIdFromToml(): string {
+  try {
+    const tomlPath = path.join(process.cwd(), "shopify.app.toml")
+    if (fs.existsSync(tomlPath)) {
+      const tomlContent = fs.readFileSync(tomlPath, "utf-8")
+      const clientIdMatch = tomlContent.match(/client_id\s*=\s*["']([^"']+)["']/)
+      if (clientIdMatch) {
+        return clientIdMatch[1]
+      }
+    }
+  } catch (error) {
+    console.error("Could not read client_id from shopify.app.toml:", error)
+  }
+  return ""
+}
+
+// Read application_url from shopify.app.toml if not in env
+function getAppUrlFromToml(): string {
+  try {
+    const tomlPath = path.join(process.cwd(), "shopify.app.toml")
+    if (fs.existsSync(tomlPath)) {
+      const tomlContent = fs.readFileSync(tomlPath, "utf-8")
+      const appUrlMatch = tomlContent.match(/application_url\s*=\s*["']([^"']+)["']/)
+      if (appUrlMatch) {
+        return appUrlMatch[1]
+      }
+    }
+  } catch (error) {
+    console.error("Could not read application_url from shopify.app.toml:", error)
+  }
+  return ""
+}
+
+// Prioritize TOML over environment variables
+const SHOPIFY_CLIENT_ID = getClientIdFromToml() || process.env.SHOPIFY_CLIENT_ID || ""
 const SHOPIFY_CLIENT_SECRET = process.env.SHOPIFY_CLIENT_SECRET || ""
 const SHOPIFY_SCOPES = process.env.SHOPIFY_SCOPES || "read_products"
-const APP_URL = process.env.APP_URL || process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"
+const APP_URL = getAppUrlFromToml() || process.env.APP_URL || process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"
 
 /**
  * Verify installation request HMAC signature
@@ -56,6 +93,19 @@ export function generateNonce(): string {
  */
 export function buildAuthUrl(shop: string, redirectUri: string, state: string, isOnline: boolean = true): string {
   const scopes = SHOPIFY_SCOPES.split(",").map((s) => s.trim()).join(",")
+  
+  // 🔍 LOG: Application URL and Redirect URI
+  console.error("🔍 ========== OAuth URL Building ==========")
+  console.error("APP_URL (resolved):", APP_URL)
+  console.error("process.env.APP_URL:", process.env.APP_URL || "NOT SET")
+  console.error("process.env.NEXT_PUBLIC_APP_URL:", process.env.NEXT_PUBLIC_APP_URL || "NOT SET")
+  console.error("Redirect URI (being used):", redirectUri)
+  console.error("Shop:", shop)
+  console.error("Scopes:", scopes)
+  console.error("Client ID (from TOML/env):", SHOPIFY_CLIENT_ID)
+  const tomlClientId = getClientIdFromToml()
+  console.error("Client ID source:", tomlClientId ? "TOML" : (process.env.SHOPIFY_CLIENT_ID ? "ENV" : "NONE"))
+  
   const params = new URLSearchParams({
     client_id: SHOPIFY_CLIENT_ID,
     scope: scopes,
@@ -67,7 +117,13 @@ export function buildAuthUrl(shop: string, redirectUri: string, state: string, i
     params.append("grant_options[]", "per-user")
   }
 
-  return `https://${shop}/admin/oauth/authorize?${params.toString()}`
+  const authUrl = `https://${shop}/admin/oauth/authorize?${params.toString()}`
+  
+  // 🔍 LOG: Final OAuth URL
+  console.error("Final OAuth URL:", authUrl)
+  console.error("=========================================")
+  
+  return authUrl
 }
 
 /**
