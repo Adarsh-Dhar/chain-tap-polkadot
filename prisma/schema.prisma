@@ -63,3 +63,18 @@ model ProductToken {
   @@map("product_tokens")
 }
 
+model ShopifySession {
+  id                Int       @id @default(autoincrement())
+  shop              String    @unique // shop domain (e.g., example.myshopify.com)
+  accessToken       String    // Shopify access token
+  scope             String    // granted scopes (comma-separated)
+  expiresAt         DateTime? // token expiry (for online tokens)
+  associatedUserId  Int?      // Shopify user ID (for online tokens)
+  associatedUserEmail String? // Shopify user email (for online tokens)
+  isOnline          Boolean   @default(false) // online vs offline token
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  @@map("shopify_sessions")
+}
+

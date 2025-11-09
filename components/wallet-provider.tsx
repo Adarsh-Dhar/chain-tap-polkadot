@@ -1,7 +1,6 @@
 "use client"
 
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react'
-import { web3Enable, web3Accounts } from '@polkadot/extension-dapp'
 import type { InjectedAccountWithMeta } from '@polkadot/extension-inject/types'
 
 interface WalletContextType {
@@ -23,19 +22,11 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
   const [selectedAccount, setSelectedAccount] = useState<InjectedAccountWithMeta | null>(null)
   const [isConnecting, setIsConnecting] = useState(false)
 
-  // Load saved account on mount
-  useEffect(() => {
-    if (typeof window === 'undefined') return
-
-    const savedAddress = localStorage.getItem(STORAGE_KEY)
-    if (savedAddress) {
-      // Try to reconnect to saved account
-      reconnectToSavedAccount(savedAddress)
-    }
-  }, [])
-
   const reconnectToSavedAccount = useCallback(async (address: string) => {
+    if (typeof window === 'undefined') return
+    
     try {
+      const { web3Enable, web3Accounts } = await import('@polkadot/extension-dapp')
       const extensions = await web3Enable('ChainTap')
       if (extensions.length === 0) return
 
@@ -51,13 +42,34 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
       }
     } catch (error) {
       console.error('Error reconnecting to wallet:', error)
-      localStorage.removeItem(STORAGE_KEY)
+      if (typeof window !== 'undefined') {
+        localStorage.removeItem(STORAGE_KEY)
+      }
     }
   }, [])
 
+  // Load saved account on mount
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+
+    const savedAddress = localStorage.getItem(STORAGE_KEY)
+    if (savedAddress) {
+      // Try to reconnect to saved account
+      reconnectToSavedAccount(savedAddress)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []) // reconnectToSavedAccount is stable (empty deps), safe to omit
+
   const connect = useCallback(async (): Promise<InjectedAccountWithMeta> => {
+    if (typeof window === 'undefined') {
+      throw new Error('Wallet connection is only available in the browser')
+    }
+
     setIsConnecting(true)
     try {
+      // Dynamically import Polkadot extension functions (client-side only)
+      const { web3Enable, web3Accounts } = await import('@polkadot/extension-dapp')
+      
       // Request wallet permissions
       const extensions = await web3Enable('ChainTap')
 

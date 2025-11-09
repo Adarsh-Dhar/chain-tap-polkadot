@@ -9,10 +9,32 @@ This app exposes a public webhook endpoint for Shopify `orders/create` events an
 Create `.env.local` with (or copy `phala.env.example` and fill values):
 
 ```
+# Database
+DATABASE_URL=postgresql://user:password@localhost:5432/chainTap
+
+# Shopify OAuth (required for app installation)
+SHOPIFY_CLIENT_ID=your_client_id_from_shopify_app_toml
+SHOPIFY_CLIENT_SECRET=your_client_secret_from_shopify_partners_dashboard
+SHOPIFY_SCOPES=read_products  # comma-separated scopes
+APP_URL=http://localhost:3000  # or your production URL
+
+# Shopify Webhooks
 SHOPIFY_WEBHOOK_SECRET=your_webhook_secret
+
+# Phala/Phat Contract
 PHAT_ENDPOINT_URL=https://your-phat-endpoint
 PHAT_FORWARD_TOKEN=shared-forward-token
 ```
+
+**OAuth Setup:**
+1. Get `SHOPIFY_CLIENT_ID` from your `shopify.app.toml` file (already configured)
+2. Get `SHOPIFY_CLIENT_SECRET` from your Shopify Partners dashboard:
+   - Go to https://partners.shopify.com
+   - Select your app
+   - Go to "App setup" → "Client credentials"
+   - Copy the "Client secret"
+3. Set `APP_URL` to your app's public URL (e.g., `https://your-domain.com` for production)
+4. Ensure the redirect URL in `shopify.app.toml` matches: `{APP_URL}/api/auth/callback`
 
 ### Endpoint
 

@@ -5,6 +5,7 @@ import { ConnectWalletButton } from "@/components/connect-wallet-button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { useEffect, useState } from "react"
+import { useSearchParams } from "next/navigation"
 import { Loader2, Package, Coins, Eye } from "lucide-react"
 import { useWallet } from "@/components/wallet-provider"
 
@@ -123,6 +124,7 @@ const PRODUCTS_QUERY = `
 
 export default function ProductsPage() {
   const { isConnected, selectedAccount } = useWallet()
+  const searchParams = useSearchParams()
   const [products, setProducts] = useState<Product[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -136,7 +138,25 @@ export default function ProductsPage() {
         setLoading(true)
         setError(null)
 
-        const response = await fetch("/api/shopify/graphql", {
+        // Get shop parameter from URL
+        const shop = searchParams.get("shop")
+        console.log("🔍 [CLIENT] Fetching products for shop:", shop)
+        
+        if (!shop) {
+          console.error("❌ [CLIENT] ERROR: Shop parameter is missing")
+          setError("Shop parameter is required. Please access this page with a shop parameter in the URL.")
+          setLoading(false)
+          return
+        }
+
+        // Build GraphQL API URL with shop parameter
+        const graphqlUrl = new URL("/api/shopify/graphql", window.location.origin)
+        graphqlUrl.searchParams.set("shop", shop)
+
+        console.log("🚀 [CLIENT] Calling GraphQL API:", graphqlUrl.toString())
+        console.log("🚀 [CLIENT] Shop parameter:", shop)
+
+        const response = await fetch(graphqlUrl.toString(), {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
@@ -146,11 +166,20 @@ export default function ProductsPage() {
           }),
         })
 
+        console.log("📥 [CLIENT] Response status:", response.status, response.statusText)
+
         if (!response.ok) {
+          const errorData = await response.json().catch(() => ({}))
+          console.error("❌ [CLIENT] GraphQL request failed:", {
+            status: response.status,
+            statusText: response.statusText,
+            error: errorData
+          })
           throw new Error(`Failed to fetch products: ${response.statusText}`)
         }
 
         const data: ProductsResponse = await response.json()
+        console.log("✅ [CLIENT] Products fetched successfully:", data.data?.products?.edges?.length || 0, "products")
 
         if (data.errors && data.errors.length > 0) {
           throw new Error(data.errors[0].message)
@@ -170,6 +199,10 @@ export default function ProductsPage() {
       }
     }
 
+    fetchProducts()
+  }, [searchParams])
+
+  useEffect(() => {
     async function fetchProductTokens() {
       try {
         // Fetch existing product tokens from database
@@ -189,7 +222,6 @@ export default function ProductsPage() {
       }
     }
 
-    fetchProducts()
     fetchProductTokens()
   }, [])
 
