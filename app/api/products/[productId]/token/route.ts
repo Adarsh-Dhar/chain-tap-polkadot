@@ -137,49 +137,15 @@ export async function POST(
               },
             })
             
-            // If conflict found, find next available assetId that's not in our database
+            // If conflict found, create a new asset (without specifying ID) to get the current nextAssetId
             if (existingWithAssetId) {
-              console.warn(`⚠️  Asset ID ${assetId} is already assigned to product ${existingWithAssetId.productId} (${existingWithAssetId.title}). Finding next available asset ID...`)
+              console.warn(`⚠️  Asset ID ${assetId} is already assigned to product ${existingWithAssetId.productId} (${existingWithAssetId.title}). Creating new asset with current nextAssetId...`)
               
-              // Get all used assetIds from database
-              const usedAssetIds = await productTokenModel.findMany({
-                where: {
-                  assetId: {
-                    not: null,
-                  },
-                },
-                select: {
-                  assetId: true,
-                },
-              })
-              
-              const usedIdsSet = new Set(usedAssetIds.map((t: { assetId: number | null }) => t.assetId).filter((id: number | null): id is number => id !== null))
-              
-              // Find next available ID starting from the conflicted one
-              let nextAvailableId = assetId
-              let attempts = 0
-              const maxAttempts = 100
-              
-              while (usedIdsSet.has(nextAvailableId) && attempts < maxAttempts) {
-                nextAvailableId++
-                attempts++
-              }
-              
-              if (attempts >= maxAttempts) {
-                console.error(`Could not find available asset ID after ${maxAttempts} attempts`)
-                return NextResponse.json(
-                  { 
-                    error: `Asset ID ${assetId} is already assigned to another product, and could not find next available ID.`,
-                    details: `Existing product: ${existingWithAssetId.title} (${existingWithAssetId.productId})`
-                  },
-                  { status: 409 }
-                )
-              }
-              
-              console.log(`Found next available asset ID: ${nextAvailableId} (was ${assetId})`)
-              
-              // Retry asset creation with the next available ID
+              // Create a new asset without specifying ID - forwarder will use current nextAssetId
               try {
+                const retryController = new AbortController()
+                const retryTimeoutId = setTimeout(() => retryController.abort(), 120000)
+                
                 const retryResponse = await fetch(`${endpoint}/assets/create`, {
                   method: "POST",
                   headers: {
@@ -189,53 +155,67 @@ export async function POST(
                   body: JSON.stringify({ 
                     name, 
                     symbol,
-                    assetId: nextAvailableId, // Request specific ID
+                    // Don't specify assetId - let forwarder use current nextAssetId
                   }),
-                  signal: controller.signal,
+                  signal: retryController.signal,
                 })
+                
+                clearTimeout(retryTimeoutId)
                 
                 if (!retryResponse.ok) {
                   const errorData = await retryResponse.json().catch(() => ({}))
-                  const errorMessage = errorData.message || errorData.error || `Failed to create token with ID ${nextAvailableId}: ${retryResponse.statusText}`
+                  const errorMessage = errorData.message || errorData.error || `Failed to create new token: ${retryResponse.statusText}`
                   console.error("Retry forwarder error:", errorMessage)
-                  
-                  // If retry fails, fall back to original assetId (maybe it was created successfully)
-                  console.warn(`Retry failed, using original assetId ${assetId}`)
-                } else {
-                  const retryData = await retryResponse.json()
-                  const retryAssetId = retryData?.assetId || retryData?.id
-                  if (retryAssetId) {
-                    console.log(`Successfully created asset with ID ${retryAssetId} (retry)`)
-                    assetId = retryAssetId
-                  } else {
-                    console.warn(`Retry succeeded but no assetId returned, using original ${assetId}`)
-                  }
+                  return NextResponse.json(
+                    { 
+                      error: `Asset ID ${assetId} conflict detected, and failed to create new asset: ${errorMessage}`,
+                      details: `Existing product: ${existingWithAssetId.title} (${existingWithAssetId.productId})`
+                    },
+                    { status: 500 }
+                  )
                 }
+                
+                const retryData = await retryResponse.json()
+                const retryAssetId = retryData?.assetId || retryData?.id
+                
+                if (!retryAssetId) {
+                  console.error("Retry succeeded but no assetId returned")
+                  return NextResponse.json(
+                    { 
+                      error: `Asset ID ${assetId} conflict detected, and new asset creation returned no ID.`,
+                      details: `Existing product: ${existingWithAssetId.title} (${existingWithAssetId.productId})`
+                    },
+                    { status: 500 }
+                  )
+                }
+                
+                // Check if the new assetId also conflicts (shouldn't happen, but check anyway)
+                const newConflict = await productTokenModel.findFirst({
+                  where: {
+                    assetId: retryAssetId,
+                    productId: {
+                      not: productMetadata.id,
+                    },
+                  },
+                })
+                
+                if (newConflict) {
+                  console.error(`⚠️  New asset ID ${retryAssetId} also conflicts with product ${newConflict.productId}`)
+                  // This is very unlikely - the chain's nextAssetId should have advanced
+                  // But if it happens, we'll use it anyway and let the unique constraint handle it
+                  console.warn(`Using conflicted asset ID ${retryAssetId} - database constraint will prevent duplicate`)
+                }
+                
+                console.log(`Successfully created new asset with ID ${retryAssetId} (was ${assetId})`)
+                assetId = retryAssetId
               } catch (retryError) {
                 console.error("Error retrying asset creation:", retryError)
-                // Continue with original assetId - maybe the forwarder already created it
-                console.warn(`Retry failed, using original assetId ${assetId}`)
-              }
-              
-              // Check again after retry
-              existingWithAssetId = await productTokenModel.findFirst({
-                where: {
-                  assetId: assetId,
-                  productId: {
-                    not: productMetadata.id,
-                  },
-                },
-              })
-              
-              if (existingWithAssetId) {
-                // Still a conflict - this shouldn't happen but handle it
-                console.error(`⚠️  Still have conflict after retry. Asset ID ${assetId} is assigned to ${existingWithAssetId.productId}`)
                 return NextResponse.json(
                   { 
-                    error: `Asset ID ${assetId} is already assigned to another product. Please try again.`,
+                    error: `Asset ID ${assetId} conflict detected, and failed to create new asset: ${retryError instanceof Error ? retryError.message : 'Unknown error'}`,
                     details: `Existing product: ${existingWithAssetId.title} (${existingWithAssetId.productId})`
                   },
-                  { status: 409 }
+                  { status: 500 }
                 )
               }
             }
