@@ -9,6 +9,10 @@ export async function GET(
 ) {
   try {
     const { productId } = await params
+    
+    // Extract address from query parameters (wallet address from frontend)
+    const url = new URL(req.url)
+    const walletAddress = url.searchParams.get("address")
 
     // Get prisma client
     let prisma
@@ -74,9 +78,12 @@ export async function GET(
       )
     }
 
-    if (!signerAddress) {
+    // Use wallet address if provided, otherwise fall back to signer address
+    const address = walletAddress || signerAddress
+
+    if (!address) {
       return NextResponse.json(
-        { error: "Signer address not configured in contract" },
+        { error: "No address provided and signer address not configured in contract" },
         { status: 400 }
       )
     }
@@ -91,7 +98,7 @@ export async function GET(
     }
 
     const endpoint = phalaEndpoint.replace(/\/$/, "")
-    const balanceUrl = `${endpoint}/asset/${assetId}/balance/${signerAddress}`
+    const balanceUrl = `${endpoint}/asset/${assetId}/balance/${address}`
 
     try {
       const response = await fetch(balanceUrl, {
@@ -102,9 +109,35 @@ export async function GET(
       })
 
       if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}))
+        // Try to parse error response
+        let errorData
+        try {
+          errorData = await response.json()
+        } catch {
+          errorData = { message: response.statusText }
+        }
+        
         const errorMessage = errorData.message || errorData.error || `Failed to fetch balance: ${response.statusText}`
-        console.error("Forwarder error:", errorMessage)
+        
+        // If it's a 404, it might mean the account doesn't exist yet (which is normal for new wallets)
+        if (response.status === 404) {
+          return NextResponse.json({
+            assetId,
+            address,
+            balance: "0",
+            balanceFormatted: "0",
+            exists: false,
+            decimals: 12
+          }, { status: 200 })
+        }
+        
+        console.error("Forwarder error:", {
+          status: response.status,
+          statusText: response.statusText,
+          error: errorMessage,
+          url: balanceUrl
+        })
+        
         return NextResponse.json(
           { error: errorMessage },
           { status: response.status }
@@ -112,9 +145,27 @@ export async function GET(
       }
 
       const data = await response.json()
+      
+      // Handle forwarder response format
+      if (data.status === 'success') {
+        // Forwarder returns { status: 'success', ...balance }
+        return NextResponse.json({
+          assetId: data.assetId,
+          address: data.address,
+          balance: data.balance,
+          balanceFormatted: data.balanceFormatted,
+          exists: data.exists,
+          decimals: data.decimals
+        }, { status: 200 })
+      }
+      
+      // If it's already in the expected format, return as is
       return NextResponse.json(data, { status: 200 })
     } catch (fetchError) {
-      console.error("Error calling forwarder:", fetchError)
+      console.error("Error calling forwarder:", {
+        error: fetchError instanceof Error ? fetchError.message : "Unknown error",
+        url: balanceUrl
+      })
       return NextResponse.json(
         {
           error: "Failed to fetch asset balance",

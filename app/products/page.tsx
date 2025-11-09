@@ -6,6 +6,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button"
 import { useEffect, useState } from "react"
 import { Loader2, Package, Coins, Eye } from "lucide-react"
+import { useWallet } from "@/components/wallet-provider"
 
 type Product = {
   id: string
@@ -121,6 +122,7 @@ const PRODUCTS_QUERY = `
 `
 
 export default function ProductsPage() {
+  const { isConnected, selectedAccount } = useWallet()
   const [products, setProducts] = useState<Product[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -151,7 +153,6 @@ export default function ProductsPage() {
         const data: ProductsResponse = await response.json()
 
         if (data.errors && data.errors.length > 0) {
-          console.error("GraphQL Errors:", data.errors)
           throw new Error(data.errors[0].message)
         }
 
@@ -164,7 +165,6 @@ export default function ProductsPage() {
       } catch (err) {
         const errorMessage = err instanceof Error ? err.message : "Failed to load products"
         setError(errorMessage)
-        console.error("Error fetching products:", err)
       } finally {
         setLoading(false)
       }
@@ -176,21 +176,15 @@ export default function ProductsPage() {
         const response = await fetch("/api/products/tokens")
         if (response.ok) {
           const tokens = await response.json()
-          console.log("Fetched product tokens:", tokens)
           const tokenMap = new Map<string, number>()
           tokens.forEach((token: { productId: string; assetId: number | null }) => {
             if (token.assetId) {
               tokenMap.set(token.productId, token.assetId)
-              console.log(`Mapped token: ${token.productId} -> ${token.assetId}`)
             }
           })
           setProductTokens(tokenMap)
-          console.log("Product tokens map size:", tokenMap.size)
-        } else {
-          console.error("Failed to fetch product tokens:", response.status, response.statusText)
         }
       } catch (err) {
-        console.error("Error fetching product tokens:", err)
         // Don't fail if we can't fetch tokens
       }
     }
@@ -200,52 +194,6 @@ export default function ProductsPage() {
   }, [])
 
   const handleCreateToken = async (product: Product) => {
-    // Log all product details (only fields with values)
-    console.log("=== Product Details ===")
-    
-    // Always log basic fields
-    console.log("Product ID:", product.id)
-    console.log("Title:", product.title)
-    console.log("Handle:", product.handle)
-    if (product.description) console.log("Description:", product.description)
-    
-    // Log optional fields only if they have values
-    if (product.vendor) console.log("Vendor:", product.vendor)
-    if (product.productType) console.log("Product Type:", product.productType)
-    if (product.tags && product.tags.length > 0) console.log("Tags:", product.tags)
-    if (product.status) console.log("Status:", product.status)
-    if (product.createdAt) console.log("Created At:", product.createdAt)
-    if (product.updatedAt) console.log("Updated At:", product.updatedAt)
-    if (product.totalInventory !== undefined && product.totalInventory !== null) {
-      console.log("Total Inventory:", product.totalInventory)
-    }
-    if (product.priceRangeV2) {
-      console.log("Price Range:", {
-        min: `${product.priceRangeV2.minVariantPrice.amount} ${product.priceRangeV2.minVariantPrice.currencyCode}`,
-        max: `${product.priceRangeV2.maxVariantPrice.amount} ${product.priceRangeV2.maxVariantPrice.currencyCode}`
-      })
-    }
-    if (product.images && product.images.edges.length > 0) {
-      console.log("Images:", product.images.edges.map(e => ({
-        url: e.node.url,
-        altText: e.node.altText,
-        dimensions: e.node.width && e.node.height ? `${e.node.width}x${e.node.height}` : undefined
-      })))
-    }
-    if (product.variants && product.variants.edges.length > 0) {
-      console.log("Variants:", product.variants.edges.map(e => ({
-        title: e.node.title,
-        price: e.node.price,
-        sku: e.node.sku,
-        inventory: e.node.inventoryQuantity,
-        available: e.node.availableForSale
-      })))
-    }
-    
-    // Log full product object for debugging
-    console.log("Full Product Object:", JSON.stringify(product, null, 2))
-    console.log("======================")
-
     setCreatingTokens((prev) => new Set(prev).add(product.id))
 
     try {
@@ -305,7 +253,6 @@ export default function ProductsPage() {
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : "Failed to create token"
       alert(`Error: ${errorMessage}`)
-      console.error("Error creating token:", err)
     } finally {
       setCreatingTokens((prev) => {
         const next = new Set(prev)
@@ -316,39 +263,32 @@ export default function ProductsPage() {
   }
 
   const handleShowAssets = async (product: Product) => {
+    // Check if wallet is connected
+    if (!isConnected || !selectedAccount) {
+      alert("Please connect your wallet first to view token balances.")
+      return
+    }
+
     const productId = product.id.split("/").pop() || product.id
+    const walletAddress = selectedAccount.address
     setLoadingBalances((prev) => new Set(prev).add(product.id))
 
     try {
-      const response = await fetch(`/api/products/${productId}/token/balance`)
+      const response = await fetch(`/api/products/${productId}/token/balance?address=${encodeURIComponent(walletAddress)}`)
       
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}))
         const errorMessage = errorData.error || `Failed to fetch balance: ${response.statusText}`
-        console.error(`Error fetching balance for product ${product.title}:`, errorMessage)
         alert(`Error: ${errorMessage}`)
         return
       }
 
       const data = await response.json()
       
-      // Log the balance information
-      console.log("=== Asset Balance ===")
-      console.log(`Product: ${product.title}`)
-      console.log(`Product ID: ${product.id}`)
-      console.log(`Asset ID: ${data.assetId}`)
-      console.log(`Signer Address: ${data.address}`)
-      console.log(`Balance (raw): ${data.balance}`)
-      console.log(`Balance (formatted): ${data.balanceFormatted}`)
-      console.log(`Decimals: ${data.decimals || 'N/A'}`)
-      console.log(`Account exists: ${data.exists ? 'Yes' : 'No'}`)
-      console.log("=====================")
-      
-      // Also show an alert with the key info
+      // Show an alert with the key info
       alert(`Asset Balance for ${product.title}:\n\nAsset ID: ${data.assetId}\nBalance: ${data.balanceFormatted} tokens\nAddress: ${data.address}`)
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : "Failed to fetch balance"
-      console.error("Error fetching asset balance:", err)
       alert(`Error: ${errorMessage}`)
     } finally {
       setLoadingBalances((prev) => {
@@ -416,7 +356,6 @@ export default function ProductsPage() {
                     {(() => {
                       const hasToken = productTokens.has(product.id)
                       const assetId = productTokens.get(product.id)
-                      console.log(`Product ${product.id}: hasToken=${hasToken}, assetId=${assetId}`)
                       return hasToken ? (
                         <div className="space-y-2">
                           <Button
