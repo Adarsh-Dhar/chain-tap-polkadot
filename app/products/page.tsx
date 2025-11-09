@@ -69,7 +69,7 @@ type ProductsResponse = {
 
 const PRODUCTS_QUERY = `
   query {
-    products(first: 5) {
+    products(first: 250) {
       edges {
         node {
           id
@@ -138,13 +138,41 @@ export default function ProductsPage() {
         setLoading(true)
         setError(null)
 
-        // Get shop parameter from URL
-        const shop = searchParams.get("shop")
-        console.log("🔍 [CLIENT] Fetching products for shop:", shop)
+        // Get shop parameter from URL first
+        let shop = searchParams.get("shop")
+        console.log("🔍 [CLIENT] Shop from URL:", shop || "Not found")
+        
+        // If no shop in URL, try to get it from session
+        if (!shop) {
+          console.log("🔍 [CLIENT] No shop in URL, fetching from session...")
+          try {
+            const sessionResponse = await fetch("/api/shop/session")
+            if (sessionResponse.ok) {
+              const sessionData = await sessionResponse.json()
+              
+              // If we have sessions, use the most recent one
+              if (sessionData.sessions && sessionData.sessions.length > 0) {
+                // Get the most recent non-expired session
+                const validSession = sessionData.sessions.find(
+                  (s: { isExpired: boolean }) => !s.isExpired
+                ) || sessionData.sessions[0]
+                
+                shop = validSession.shop
+                console.log("✅ [CLIENT] Found shop from session:", shop)
+              } else if (sessionData.shop) {
+                // Single session response
+                shop = sessionData.shop
+                console.log("✅ [CLIENT] Found shop from session:", shop)
+              }
+            }
+          } catch (sessionErr) {
+            console.error("❌ [CLIENT] Error fetching session:", sessionErr)
+          }
+        }
         
         if (!shop) {
           console.error("❌ [CLIENT] ERROR: Shop parameter is missing")
-          setError("Shop parameter is required. Please access this page with a shop parameter in the URL.")
+          setError("No authenticated shop found. Please authenticate your Shopify store first.")
           setLoading(false)
           return
         }
