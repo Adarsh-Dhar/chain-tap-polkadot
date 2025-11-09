@@ -144,13 +144,9 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    // Non-embedded or fallback - redirect to app root with shop and host
-    const redirectUrl = new URL(APP_URL)
-    redirectUrl.searchParams.set("shop", validation.shop)
-    if (host) {
-      redirectUrl.searchParams.set("host", host)
-    }
-
+    // Non-embedded or fallback - redirect to app root (without shop param to avoid middleware loop)
+    const redirectUrl = new URL("/", req.url)
+    // Don't add shop param - session is already in database, no need to pass it
     return NextResponse.redirect(redirectUrl.toString())
   } catch (error) {
     console.error("OAuth callback error:", error)

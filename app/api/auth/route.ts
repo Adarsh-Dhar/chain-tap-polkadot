@@ -121,13 +121,9 @@ export async function GET(req: NextRequest) {
           return NextResponse.redirect(embeddedUrl)
         }
       }
-      // Non-embedded or no host - redirect to app root
-      const redirectUrl = new URL(APP_URL)
-      redirectUrl.searchParams.set("shop", shop)
-      const host = searchParams.get("host")
-      if (host) {
-        redirectUrl.searchParams.set("host", host)
-      }
+      // Non-embedded or no host - redirect to app root (without shop param to avoid middleware loop)
+      const redirectUrl = new URL("/", req.url)
+      // Don't add shop param - session is already in database, no need to pass it
       return NextResponse.redirect(redirectUrl.toString())
     }
 
