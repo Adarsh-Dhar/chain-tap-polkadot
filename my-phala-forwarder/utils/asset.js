@@ -467,7 +467,7 @@ async function createAssetIfMissing(desiredAssetId, metadata) {
     // Use wallet from getWallet() to ensure we're using the exact same instance as minting
     const signingWallet = getWallet() || wallet;
     console.log(`Signing with wallet: ${signingWallet.address}`);
-    tx.signAndSend(signingWallet, { nonce }, ({ status, txHash, dispatchError, events }) => {
+    tx.signAndSend(signingWallet, { nonce, tip: 2000000000 }, ({ status, txHash, dispatchError, events }) => {
       // Capture txHash as soon as we get it
       if (txHash && !transactionHash) {
         transactionHash = txHash.toString();
