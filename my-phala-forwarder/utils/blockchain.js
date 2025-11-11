@@ -26,8 +26,12 @@ async function initPolkadot() {
     // Wait for API to be ready
     await api.isReady;
     
-    // Initialize keyring (Westend-compatible sr25519)
-    keyring = new Keyring({ type: 'sr25519' });
+    // Initialize keyring with Westend SS58 format (42)
+    // Westend Asset Hub uses SS58 format 42
+    keyring = new Keyring({ 
+      type: 'sr25519',
+      ss58Format: 42  // Westend format
+    });
     
     // Load Phat Contract's wallet from environment
     const mnemonic = process.env.PHAT_CONTRACT_MNEMONIC;
@@ -38,10 +42,13 @@ async function initPolkadot() {
     }
     
     if (mnemonic) {
-      wallet = keyring.addFromMnemonic(mnemonic);
+      wallet = keyring.addFromMnemonic(mnemonic, {}, 'sr25519');
     } else if (seed) {
-      wallet = keyring.addFromUri(seed);
+      wallet = keyring.addFromUri(seed, {}, 'sr25519');
     }
+    
+    // Verify the wallet address matches expected format
+    console.log('✓ Wallet initialized with SS58 format 42 (Westend)');
     
     console.log('✓ Connected to Westend Asset Hub');
     console.log('✓ Wallet address:', wallet.address);
@@ -262,18 +269,93 @@ async function mintAndTransferTokens(recipientAddress, amount, assetId) {
       console.log('Could not estimate transaction fee');
     }
 
+    // Get the next available nonce (accounts for pending transactions)
+    const accountNextIndex = await api.rpc.system.accountNextIndex(wallet.address);
+    const nonce = accountNextIndex.toNumber();
+    console.log(`Using nonce: ${nonce}`);
+    
+    // Get current account info to check for pending transactions
+    const accountInfo = await api.query.system.account(wallet.address);
+    const currentNonce = accountInfo.nonce.toNumber();
+    if (nonce > currentNonce) {
+      console.log(`⚠️  Warning: There are ${nonce - currentNonce} pending transaction(s) ahead of this one`);
+    }
+
+    // Add a tip to increase transaction priority (0.01 WND for better priority)
+    const tipMultiplier = new BN(10).pow(new BN(balance.decimals - 2)); // 0.01 in smallest units
+    const tipAmount = tipMultiplier;
+    const tipFormatted = tipAmount.div(new BN(10).pow(new BN(balance.decimals - 2))).toString();
+    console.log(`Adding tip: ${tipFormatted} ${balance.tokenSymbol} to increase priority`);
+
     // Sign and send transaction
+    let transactionHash = null;
     return new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => {
+      const timeout = setTimeout(async () => {
+        // Before rejecting, check if transaction was actually included
+        if (transactionHash) {
+          console.log(`⏳ Timeout reached, checking if transaction ${transactionHash} was included...`);
+          try {
+            // Try to find the transaction in recent blocks
+            const header = await api.rpc.chain.getHeader();
+            const currentBlock = header.number.toNumber();
+            
+            // Check last 10 blocks
+            for (let i = 0; i < 10; i++) {
+              const blockNumber = currentBlock - i;
+              if (blockNumber < 0) break;
+              
+              try {
+                const blockHash = await api.rpc.chain.getBlockHash(blockNumber);
+                const block = await api.rpc.chain.getBlock(blockHash);
+                
+                const found = block.block.extrinsics.find(ext => {
+                  if (ext.isSigned) {
+                    const hash = ext.hash.toString();
+                    return hash === transactionHash;
+                  }
+                  return false;
+                });
+                
+                if (found) {
+                  clearTimeout(timeout);
+                  console.log(`✓ Transaction ${transactionHash} was found in block ${blockNumber}`);
+                  resolve(transactionHash);
+                  return;
+                }
+              } catch (e) {
+                // Continue checking other blocks
+              }
+            }
+          } catch (e) {
+            console.log(`Could not verify transaction status: ${e.message}`);
+          }
+        }
+        
         reject(new Error(
-          'Transaction timeout: Transaction not confirmed within 60 seconds. ' +
-          `This may indicate network issues or the transaction is still pending. ` +
-          `Check your wallet balance and network connection.`
+          'Transaction timeout: Transaction not confirmed within 120 seconds. ' +
+          `Transaction hash: ${transactionHash || 'unknown'}. ` +
+          `Transaction may still be pending in the pool. ` +
+          `Check your wallet balance and network connection. ` +
+          `You can check transaction status on a block explorer using the transaction hash.`
         ));
-      }, 60000); // 60 second timeout
+      }, 120000); // 120 second timeout
 
       console.log('=== Sending Transaction ===');
-      tx.signAndSend(wallet, ({ status, txHash, events, dispatchError }) => {
+      console.log(`Signing with wallet: ${wallet.address}`);
+      console.log(`Wallet type: ${wallet.type}`);
+      console.log(`Nonce: ${nonce}`);
+      console.log(`Tip: ${tipFormatted} ${balance.tokenSymbol}`);
+      
+      // Sign and send transaction with explicit nonce and tip
+      tx.signAndSend(wallet, { nonce, tip: tipAmount }, ({ status, txHash, events, dispatchError }) => {
+        // Store transaction hash for timeout checking (available from first callback)
+        if (txHash) {
+          const hashStr = txHash.toString();
+          if (!transactionHash) {
+            transactionHash = hashStr;
+            console.log(`📝 Transaction hash: ${hashStr}`);
+          }
+        }
         if (dispatchError) {
           clearTimeout(timeout);
           let errorMessage = 'Transaction failed: ';
@@ -320,7 +402,18 @@ async function mintAndTransferTokens(recipientAddress, amount, assetId) {
         } else if (status.isReady) {
           console.log(`→ Transaction ${txHash.toString()} ready (broadcasting...)`);
         } else if (status.isBroadcast) {
-          console.log(`→ Transaction ${txHash.toString()} broadcasted (in pool...)`);
+          console.log(`→ Transaction ${txHash.toString()} broadcasted (waiting to be included in block...)`);
+        } else {
+          // Log other status types for debugging
+          const statusStr = status.toString ? status.toString() : JSON.stringify(status);
+          console.log(`→ Transaction ${txHash.toString()} status: ${statusStr}`);
+          
+          // Check for error statuses
+          if (status.isInvalid || status.isDropped) {
+            clearTimeout(timeout);
+            console.error(`❌ Transaction ${txHash.toString()} was ${status.isInvalid ? 'invalid' : 'dropped'}`);
+            reject(new Error(`Transaction was ${status.isInvalid ? 'invalid' : 'dropped'}`));
+          }
         }
       }).catch((error) => {
         clearTimeout(timeout);
@@ -356,13 +449,18 @@ async function transferTokens(recipientAddress, amount, assetId) {
     // Construct transaction: assets.transfer(assetId, recipientAddress, amount)
     const tx = api.tx.assets.transfer(assetId, recipientAddress, amount);
 
+    // Get the next available nonce (accounts for pending transactions)
+    const accountNextIndex = await api.rpc.system.accountNextIndex(wallet.address);
+    const nonce = accountNextIndex.toNumber();
+    console.log(`Using nonce: ${nonce}`);
+
     // Sign and send transaction
     return new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
         reject(new Error('Transaction timeout: Transaction not confirmed within 60 seconds'));
       }, 60000); // 60 second timeout
 
-      tx.signAndSend(wallet, ({ status, txHash, events, dispatchError }) => {
+      tx.signAndSend(wallet, { nonce }, ({ status, txHash, events, dispatchError }) => {
         if (dispatchError) {
           clearTimeout(timeout);
           if (dispatchError.isModule) {

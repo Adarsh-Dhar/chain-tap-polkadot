@@ -6,7 +6,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button"
 import { useEffect, useState } from "react"
 import { useSearchParams } from "next/navigation"
-import { Loader2, Package, Coins, Eye, ShoppingCart, Plus, Minus, Trash2 } from "lucide-react"
+import { Loader2, Package, Coins, Eye, ShoppingCart, Plus, Minus, Trash2, CheckCircle2, XCircle, Info } from "lucide-react"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { useWallet } from "@/components/wallet-provider"
 
 type Product = {
@@ -160,6 +161,11 @@ export default function ProductsPage() {
   const [cart, setCart] = useState<CartItem[]>([])
   const [buyQuantities, setBuyQuantities] = useState<Map<string, number>>(new Map()) // productId -> quantity for buy
   const [creatingCheckout, setCreatingCheckout] = useState(false)
+  const [mintingOrder, setMintingOrder] = useState(false)
+  const [mintStatus, setMintStatus] = useState<{
+    type: "success" | "error" | "info" | null
+    message: string
+  } | null>(null)
 
   useEffect(() => {
     async function fetchProducts() {
@@ -390,6 +396,154 @@ export default function ProductsPage() {
       cancelled = true
     }
   }, [isConnected, selectedAccount?.address, productTokens, products])
+
+  // Auto-mint tokens when confirmationId is present and wallet is connected
+  useEffect(() => {
+    const confirmationId = searchParams.get("confirmationId")
+    
+    console.log("🔄 [AUTO-MINT] Effect triggered:", {
+      confirmationId,
+      isConnected,
+      hasSelectedAccount: !!selectedAccount,
+      walletAddress: selectedAccount?.address,
+      mintingOrder,
+    })
+    
+    // Only proceed if we have a confirmationId and haven't already processed it
+    if (!confirmationId) {
+      console.log("🔄 [AUTO-MINT] No confirmationId found, skipping")
+      return
+    }
+    
+    if (mintingOrder) {
+      console.log("🔄 [AUTO-MINT] Already minting, skipping")
+      return
+    }
+
+    // Check if wallet is connected
+    if (!isConnected || !selectedAccount?.address) {
+      console.log("🔄 [AUTO-MINT] Wallet not connected, showing info message")
+      setMintStatus({
+        type: "info",
+        message: "Please connect your wallet to receive tokens for your order.",
+      })
+      return
+    }
+
+    // Get shop from URL or session
+    async function triggerMinting() {
+      try {
+        console.log("🚀 [AUTO-MINT] Starting minting process...")
+        setMintingOrder(true)
+        setMintStatus(null)
+
+        // Get shop
+        let shop = searchParams.get("shop")
+        if (!shop) {
+          try {
+            const sessionResponse = await fetch("/api/shop/session")
+            if (sessionResponse.ok) {
+              const sessionData = await sessionResponse.json()
+              if (sessionData.sessions && sessionData.sessions.length > 0) {
+                const validSession = sessionData.sessions.find(
+                  (s: { isExpired: boolean }) => !s.isExpired
+                ) || sessionData.sessions[0]
+                shop = validSession.shop
+              } else if (sessionData.shop) {
+                shop = sessionData.shop
+              }
+            }
+          } catch (err) {
+            console.error("❌ [AUTO-MINT] Error fetching session:", err)
+          }
+        }
+
+        console.log("🔄 [AUTO-MINT] Shop:", shop)
+
+        if (!shop) {
+          console.error("❌ [AUTO-MINT] No shop found")
+          setMintStatus({
+            type: "error",
+            message: "Shop information not available. Please refresh the page.",
+          })
+          setMintingOrder(false)
+          return
+        }
+
+        // Call mint endpoint (confirmationId is guaranteed to be non-null here due to early return)
+        if (!confirmationId) return
+        
+        console.log("🔄 [AUTO-MINT] Calling mint API:", {
+          confirmationId,
+          walletAddress: selectedAccount.address,
+          shop,
+        })
+        
+        const response = await fetch(`/api/orders/${encodeURIComponent(confirmationId)}/mint`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            walletAddress: selectedAccount.address,
+            shop,
+          }),
+        })
+
+        console.log("🔄 [AUTO-MINT] API response status:", response.status)
+
+        const data = await response.json()
+
+        if (!response.ok) {
+          console.error("❌ [AUTO-MINT] API error:", data)
+          // Check if already minted
+          if (response.status === 409 && data.existingReward) {
+            setMintStatus({
+              type: "info",
+              message: `Tokens for this order have already been minted. Transaction: ${data.existingReward.txHash || "N/A"}`,
+            })
+          } else {
+            setMintStatus({
+              type: "error",
+              message: data.error || `Failed to mint tokens: ${response.statusText}`,
+            })
+          }
+          setMintingOrder(false)
+          return
+        }
+
+        // Success
+        if (data.success) {
+          console.log("✅ [AUTO-MINT] Minting successful:", data)
+          setMintStatus({
+            type: "success",
+            message: `✅ Successfully minted ${data.totalTokens} tokens! Transaction${data.txHashes?.length > 1 ? "s" : ""}: ${data.txHashes?.join(", ") || "N/A"}`,
+          })
+
+          // Remove confirmationId from URL to prevent re-triggering
+          const newUrl = new URL(window.location.href)
+          newUrl.searchParams.delete("confirmationId")
+          window.history.replaceState({}, "", newUrl.toString())
+        } else {
+          console.error("❌ [AUTO-MINT] Minting failed:", data)
+          setMintStatus({
+            type: "error",
+            message: data.error || "Failed to mint tokens",
+          })
+        }
+      } catch (error) {
+        console.error("❌ [AUTO-MINT] Error minting tokens:", error)
+        setMintStatus({
+          type: "error",
+          message: error instanceof Error ? error.message : "Failed to mint tokens",
+        })
+      } finally {
+        setMintingOrder(false)
+      }
+    }
+
+    triggerMinting()
+  }, [searchParams, isConnected, selectedAccount, mintingOrder])
 
   const handleCreateToken = async (product: Product) => {
     setCreatingTokens((prev) => new Set(prev).add(product.id))
@@ -960,6 +1114,46 @@ export default function ProductsPage() {
       />
 
       <div className="max-w-7xl mx-auto px-6 py-8">
+        {/* Mint Status Banner */}
+        {(mintStatus || mintingOrder) && (
+          <Alert
+            className={`mb-6 ${
+              mintStatus?.type === "success"
+                ? "border-green-500 bg-green-50 dark:bg-green-950"
+                : mintStatus?.type === "error"
+                ? "border-red-500 bg-red-50 dark:bg-red-950"
+                : "border-blue-500 bg-blue-50 dark:bg-blue-950"
+            }`}
+          >
+            {mintingOrder ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin" />
+                <AlertTitle>Minting Tokens</AlertTitle>
+                <AlertDescription>
+                  Processing your order and minting tokens. Please wait...
+                </AlertDescription>
+              </>
+            ) : mintStatus?.type === "success" ? (
+              <>
+                <CheckCircle2 className="h-4 w-4 text-green-600" />
+                <AlertTitle>Tokens Minted Successfully</AlertTitle>
+                <AlertDescription>{mintStatus.message}</AlertDescription>
+              </>
+            ) : mintStatus?.type === "error" ? (
+              <>
+                <XCircle className="h-4 w-4 text-red-600" />
+                <AlertTitle>Minting Failed</AlertTitle>
+                <AlertDescription>{mintStatus.message}</AlertDescription>
+              </>
+            ) : mintStatus ? (
+              <>
+                <Info className="h-4 w-4 text-blue-600" />
+                <AlertTitle>Order Detected</AlertTitle>
+                <AlertDescription>{mintStatus.message}</AlertDescription>
+              </>
+            ) : null}
+          </Alert>
+        )}
         {cart.length > 0 && (
           <Card className="mb-6">
             <CardHeader>
