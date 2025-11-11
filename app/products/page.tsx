@@ -84,6 +84,14 @@ type CartItem = {
   addedAt: Date
 }
 
+type TokenBalanceInfo = {
+  assetId: number
+  balance: string
+  balanceFormatted: string
+  exists?: boolean
+  error?: string
+}
+
 const PRODUCTS_QUERY = `
   query {
     products(first: 250) {
@@ -148,6 +156,7 @@ export default function ProductsPage() {
   const [creatingTokens, setCreatingTokens] = useState<Set<string>>(new Set())
   const [productTokens, setProductTokens] = useState<Map<string, number>>(new Map()) // productId -> assetId
   const [loadingBalances, setLoadingBalances] = useState<Set<string>>(new Set())
+  const [tokenBalances, setTokenBalances] = useState<Map<string, TokenBalanceInfo>>(new Map())
   const [cart, setCart] = useState<CartItem[]>([])
   const [buyQuantities, setBuyQuantities] = useState<Map<string, number>>(new Map()) // productId -> quantity for buy
   const [creatingCheckout, setCreatingCheckout] = useState(false)
@@ -223,7 +232,15 @@ export default function ProductsPage() {
             statusText: response.statusText,
             error: errorData
           })
-          throw new Error(`Failed to fetch products: ${response.statusText}`)
+          
+          // Handle 401 Unauthorized - redirect to authentication
+          if (response.status === 401 && errorData.redirect) {
+            console.log("🔐 [CLIENT] Authentication required, redirecting to:", errorData.redirect)
+            window.location.href = errorData.redirect
+            return
+          }
+          
+          throw new Error(errorData.error || `Failed to fetch products: ${response.statusText}`)
         }
 
         const data: ProductsResponse = await response.json()
@@ -272,6 +289,107 @@ export default function ProductsPage() {
 
     fetchProductTokens()
   }, [])
+
+  useEffect(() => {
+    if (!isConnected || !selectedAccount?.address) {
+      setTokenBalances((prev) => (prev.size === 0 ? prev : new Map()))
+      setLoadingBalances((prev) => (prev.size === 0 ? prev : new Set()))
+      return
+    }
+
+    if (products.length === 0 || productTokens.size === 0) {
+      setTokenBalances((prev) => (prev.size === 0 ? prev : new Map()))
+      return
+    }
+
+    const walletAddress = selectedAccount.address
+    const entries = Array.from(productTokens.entries())
+    if (entries.length === 0) {
+      setTokenBalances((prev) => (prev.size === 0 ? prev : new Map()))
+      return
+    }
+
+    const productMap = new Map(products.map((product) => [product.id, product]))
+    let cancelled = false
+
+    setLoadingBalances((prev) => {
+      const next = new Set(prev)
+      entries.forEach(([productId]) => next.add(productId))
+      return next
+    })
+
+    const loadBalances = async () => {
+      const nextBalances = new Map<string, TokenBalanceInfo>()
+
+      await Promise.all(
+        entries.map(async ([productId, assetId]) => {
+          const product = productMap.get(productId)
+          if (!product || assetId == null) {
+            return
+          }
+
+          const productKey = product.id.split("/").pop() || product.id
+
+          try {
+            const response = await fetch(
+              `/api/products/${encodeURIComponent(productKey)}/token/balance?address=${encodeURIComponent(walletAddress)}`
+            )
+
+            if (!response.ok) {
+              const errorData = await response.json().catch(() => ({}))
+              const errorMessage =
+                errorData.error || errorData.message || response.statusText || "Failed to fetch balance"
+
+              nextBalances.set(product.id, {
+                assetId,
+                balance: "0",
+                balanceFormatted: "0",
+                exists: false,
+                error: errorMessage,
+              })
+              return
+            }
+
+            const data = await response.json()
+            nextBalances.set(product.id, {
+              assetId,
+              balance: data.balance ?? data.balanceFormatted ?? "0",
+              balanceFormatted: data.balanceFormatted ?? data.balance ?? "0",
+              exists: data.exists ?? true,
+            })
+          } catch (fetchError) {
+            const errorMessage =
+              fetchError instanceof Error ? fetchError.message : "Failed to fetch balance"
+
+            nextBalances.set(product.id, {
+              assetId,
+              balance: "0",
+              balanceFormatted: "0",
+              exists: false,
+              error: errorMessage,
+            })
+          }
+        })
+      )
+
+      if (cancelled) {
+        return
+      }
+
+      setTokenBalances(nextBalances)
+      setLoadingBalances((prev) => {
+        const next = new Set(prev)
+        entries.forEach(([productId]) => next.delete(productId))
+        return next
+      })
+    }
+
+    loadBalances()
+
+    return () => {
+      cancelled = true
+    }
+  }, [isConnected, selectedAccount?.address, productTokens, products])
 
   const handleCreateToken = async (product: Product) => {
     setCreatingTokens((prev) => new Set(prev).add(product.id))
@@ -349,6 +467,12 @@ export default function ProductsPage() {
       return
     }
 
+    const assetId = productTokens.get(product.id)
+    if (!assetId) {
+      alert("No token created for this product yet.")
+      return
+    }
+
     const productId = product.id.split("/").pop() || product.id
     const walletAddress = selectedAccount.address
     setLoadingBalances((prev) => new Set(prev).add(product.id))
@@ -366,9 +490,35 @@ export default function ProductsPage() {
       const data = await response.json()
       
       // Show an alert with the key info
+      setTokenBalances((prev) => {
+        const next = new Map(prev)
+        if (assetId) {
+          next.set(product.id, {
+            assetId,
+            balance: data.balance ?? data.balanceFormatted ?? "0",
+            balanceFormatted: data.balanceFormatted ?? data.balance ?? "0",
+            exists: data.exists ?? true,
+          })
+        }
+        return next
+      })
+
       alert(`Asset Balance for ${product.title}:\n\nAsset ID: ${data.assetId}\nBalance: ${data.balanceFormatted} tokens\nAddress: ${data.address}`)
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : "Failed to fetch balance"
+      if (assetId) {
+        setTokenBalances((prev) => {
+          const next = new Map(prev)
+          next.set(product.id, {
+            assetId,
+            balance: "0",
+            balanceFormatted: "0",
+            exists: false,
+            error: errorMessage,
+          })
+          return next
+        })
+      }
       alert(`Error: ${errorMessage}`)
     } finally {
       setLoadingBalances((prev) => {
@@ -379,7 +529,28 @@ export default function ProductsPage() {
     }
   }
 
+  const ensureProductToken = (product: Product): { hasToken: boolean; assetId?: number } => {
+    const assetId = productTokens.get(product.id)
+
+    if (!assetId) {
+      alert("You need to create a token for this product before you can add it to the cart or purchase it.")
+      return { hasToken: false }
+    }
+
+    return { hasToken: true, assetId }
+  }
+
   const handleBuy = async (product: Product, quantity: number = 1) => {
+    if (!isConnected || !selectedAccount?.address) {
+      alert("Please connect your wallet before purchasing.")
+      return
+    }
+
+    const { hasToken, assetId } = ensureProductToken(product)
+    if (!hasToken) {
+      return
+    }
+
     // Validate inventory
     const availableInventory = getAvailableInventory(product)
     if (availableInventory !== null && quantity > availableInventory) {
@@ -432,10 +603,12 @@ export default function ProductsPage() {
         },
         body: JSON.stringify({
           shop,
+          walletAddress: selectedAccount.address,
           lineItems: [
             {
               variantId: selectedVariant.id,
               quantity: quantity,
+              assetId,
             },
           ],
         }),
@@ -473,6 +646,11 @@ export default function ProductsPage() {
       return
     }
 
+    if (!isConnected || !selectedAccount?.address) {
+      alert("Please connect your wallet before checking out.")
+      return
+    }
+
     // Validate inventory for all cart items
     const inventoryErrors: string[] = []
     cart.forEach((item) => {
@@ -486,6 +664,17 @@ export default function ProductsPage() {
 
     if (inventoryErrors.length > 0) {
       alert(`Inventory errors:\n\n${inventoryErrors.join("\n")}`)
+      return
+    }
+
+    // Ensure all cart items still have tokens
+    const missingTokenItems = cart.filter((item) => !item.assetId)
+    if (missingTokenItems.length > 0) {
+      alert(
+        "Each product needs an associated token before checkout. " +
+          "Please create tokens for the following products and re-add them to the cart:\n\n" +
+          missingTokenItems.map((item) => item.product.title).join("\n")
+      )
       return
     }
 
@@ -529,6 +718,7 @@ export default function ProductsPage() {
       const lineItems = cart.map((item) => ({
         variantId: item.variantId!,
         quantity: item.quantity,
+        assetId: item.assetId,
       }))
 
       // Create checkout with all cart items
@@ -539,6 +729,7 @@ export default function ProductsPage() {
         },
         body: JSON.stringify({
           shop,
+          walletAddress: selectedAccount.address,
           lineItems,
         }),
       })
@@ -670,7 +861,10 @@ export default function ProductsPage() {
   }
 
   const handleAddToCart = (product: Product) => {
-    const assetId = productTokens.get(product.id)
+    const { hasToken, assetId } = ensureProductToken(product)
+    if (!hasToken) {
+      return
+    }
 
     // Get first available variant or first variant
     const selectedVariant = product.variants?.edges?.[0]?.node
@@ -696,6 +890,7 @@ export default function ProductsPage() {
         const updatedCart = [...prevCart]
         updatedCart[existingItemIndex] = {
           ...updatedCart[existingItemIndex],
+          assetId: updatedCart[existingItemIndex].assetId ?? assetId,
           quantity: updatedCart[existingItemIndex].quantity + 1,
         }
         return updatedCart
@@ -897,8 +1092,13 @@ export default function ProductsPage() {
           </Card>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {products.map((product) => (
-              <Card key={product.id} className="hover:shadow-lg transition-shadow">
+            {products.map((product) => {
+              const assetId = productTokens.get(product.id)
+              const balanceInfo = tokenBalances.get(product.id)
+              const isBalanceLoading = loadingBalances.has(product.id)
+
+              return (
+                <Card key={product.id} className="hover:shadow-lg transition-shadow">
                 <CardHeader>
                   <CardTitle className="line-clamp-2">{product.title}</CardTitle>
                   <CardDescription className="font-mono text-xs text-muted-foreground">
@@ -910,6 +1110,31 @@ export default function ProductsPage() {
                     {product.description || "No description available"}
                   </p>
                   <div className="mt-4 pt-4 border-t border-border space-y-3">
+                    {assetId && (
+                      <div className="rounded-md border border-primary/20 bg-primary/5 px-3 py-2 text-xs space-y-1">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="font-mono text-muted-foreground">Asset #{assetId}</span>
+                          {!isConnected || !selectedAccount?.address ? (
+                            <span className="text-muted-foreground">Connect wallet to view</span>
+                          ) : isBalanceLoading ? (
+                            <span className="flex items-center gap-1 text-muted-foreground">
+                              <Loader2 className="h-3 w-3 animate-spin" />
+                              Checking...
+                            </span>
+                          ) : balanceInfo?.error ? (
+                            <span className="text-destructive font-medium">Error</span>
+                          ) : (
+                            <span className="font-semibold text-foreground">
+                              {balanceInfo?.balanceFormatted ?? "0"} tokens
+                              {balanceInfo && balanceInfo.exists === false ? " (none yet)" : ""}
+                            </span>
+                          )}
+                        </div>
+                        {balanceInfo?.error && isConnected && selectedAccount?.address && !isBalanceLoading && (
+                          <p className="text-[10px] text-destructive/80">{balanceInfo.error}</p>
+                        )}
+                      </div>
+                    )}
                     <div className="flex items-center justify-between">
                       <p className="text-xs font-mono text-muted-foreground">
                         ID: <span className="text-foreground">{product.id.split("/").pop()}</span>
@@ -1003,6 +1228,73 @@ export default function ProductsPage() {
                         <ShoppingCart className="h-4 w-4 mr-2" />
                         Add to Cart
                       </Button>
+                      {assetId && isConnected && selectedAccount?.address && (
+                        <Button
+                          onClick={async () => {
+                            if (!selectedAccount?.address) {
+                              alert("Please connect your wallet first")
+                              return
+                            }
+                            const qty = getBuyQuantity(product.id)
+                            try {
+                              const response = await fetch("/api/mint/manual", {
+                                method: "POST",
+                                headers: { "Content-Type": "application/json" },
+                                body: JSON.stringify({
+                                  productId: product.id,
+                                  walletAddress: selectedAccount.address,
+                                  assetId,
+                                  quantity: qty,
+                                }),
+                              })
+                              if (response.ok) {
+                                const data = await response.json()
+                                const txHash = data.txHash || data.result?.txHash
+                                if (txHash) {
+                                  alert(`✅ Token minted successfully!\n\nTransaction Hash: ${txHash}\n\nCheck your wallet balance.`)
+                                } else {
+                                  alert(`✅ Token minting initiated! Check your wallet balance in a few moments.`)
+                                }
+                                
+                                // Wait a bit then refresh balance
+                                setTimeout(async () => {
+                                  const productKey = product.id.split("/").pop() || product.id
+                                  const balanceResponse = await fetch(
+                                    `/api/products/${encodeURIComponent(productKey)}/token/balance?address=${encodeURIComponent(selectedAccount.address)}`
+                                  )
+                                  if (balanceResponse.ok) {
+                                    const balanceData = await balanceResponse.json()
+                                    setTokenBalances((prev) => {
+                                      const next = new Map(prev)
+                                      next.set(product.id, {
+                                        assetId,
+                                        balance: balanceData.balance ?? "0",
+                                        balanceFormatted: balanceData.balanceFormatted ?? "0",
+                                        exists: balanceData.exists ?? true,
+                                      })
+                                      return next
+                                    })
+                                  }
+                                }, 3000) // Wait 3 seconds for transaction to process
+                              } else {
+                                const error = await response.json().catch(() => ({}))
+                                const errorMsg = error.error || error.details || error.message || "Unknown error"
+                                alert(`❌ Minting failed: ${errorMsg}\n\nPlease check:\n1. Forwarder is running (port 5000)\n2. PHAT_ENDPOINT_URL is set to http://localhost:5000\n3. Wallet has sufficient balance for fees`)
+                                console.error("Minting error details:", error)
+                              }
+                            } catch (err) {
+                              console.error("Manual mint failed:", err)
+                              alert(`Failed to trigger minting: ${err instanceof Error ? err.message : "Unknown error"}\n\nMake sure PHAT_ENDPOINT_URL is set to http://localhost:5000`)
+                            }
+                          }}
+                          className="w-full"
+                          variant="outline"
+                          size="sm"
+                        >
+                          <Coins className="h-4 w-4 mr-2" />
+                          Mint Token Now
+                        </Button>
+                      )}
                       {productTokens.has(product.id) && (
                         <Button
                           onClick={() => handleShowAssets(product)}
@@ -1048,8 +1340,9 @@ export default function ProductsPage() {
                     </div>
                   </div>
                 </CardContent>
-              </Card>
-            ))}
+                </Card>
+              )
+            })}
           </div>
         )}
       </div>

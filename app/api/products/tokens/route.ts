@@ -3,7 +3,7 @@ import { NextResponse } from "next/server"
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
 
-export async function GET() {
+export async function GET(req: Request) {
   try {
     // Get prisma client
     let prisma
@@ -24,6 +24,35 @@ export async function GET() {
       console.warn("ProductToken model not available in Prisma client")
       // Return empty array if model doesn't exist yet
       return NextResponse.json([])
+    }
+
+    // Check if productId query parameter is provided
+    const url = new URL(req.url)
+    const productId = url.searchParams.get("productId")
+
+    if (productId) {
+      // Query single product token
+      const fullProductId = productId.startsWith("gid://")
+        ? productId
+        : `gid://shopify/Product/${productId}`
+
+      const token = await productTokenModel.findUnique({
+        where: { productId: fullProductId },
+        select: {
+          productId: true,
+          assetId: true,
+          title: true,
+        },
+      })
+
+      if (!token || !token.assetId) {
+        return NextResponse.json(
+          { error: "Token not found for this product" },
+          { status: 404 }
+        )
+      }
+
+      return NextResponse.json(token)
     }
 
     // Fetch all product tokens

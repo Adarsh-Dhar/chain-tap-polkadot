@@ -89,6 +89,87 @@ app.get('/asset/:assetId/balance/:address', async (req, res) => {
     return res.status(500).json({ status: 'error', message: e.message });
   }
 });
+// Direct mint endpoint - bypasses order parsing
+app.post('/mint', async (req, res) => {
+  const receivedToken = req.headers['x-forward-token'];
+  if (!PHAT_FORWARD_TOKEN || receivedToken !== PHAT_FORWARD_TOKEN) {
+    console.error('Unauthorized: Token mismatch');
+    return res.status(401).json({ status: 'error', message: 'Unauthorized' });
+  }
+
+  try {
+    const { assetId, walletAddress, quantity = 1 } = req.body;
+
+    if (!assetId) {
+      return res.status(400).json({ status: 'error', message: 'Asset ID is required' });
+    }
+
+    if (!walletAddress) {
+      return res.status(400).json({ status: 'error', message: 'Wallet address is required' });
+    }
+
+    const assetIdNum = parseInt(String(assetId), 10);
+    if (!Number.isFinite(assetIdNum)) {
+      return res.status(400).json({ status: 'error', message: 'Invalid asset ID' });
+    }
+
+    if (!isValidWalletAddress(walletAddress)) {
+      return res.status(400).json({ status: 'error', message: 'Invalid wallet address format' });
+    }
+
+    const qty = Number.isFinite(quantity) ? Math.max(1, parseInt(String(quantity), 10)) : 1;
+
+    console.log('=== DIRECT MINT REQUEST ===');
+    console.log('Asset ID:', assetIdNum);
+    console.log('Wallet:', walletAddress);
+    console.log('Quantity:', qty);
+
+    await initPolkadot();
+
+    const BN = require('@polkadot/util').BN;
+    const decimals = parseInt(process.env.TOKEN_DECIMALS || '12', 10);
+    const multiplier = new BN(10).pow(new BN(decimals));
+    const amount = new BN(qty).mul(multiplier);
+
+    console.log(`➡️ Minting ${qty} token(s) of asset ${assetIdNum} to ${walletAddress}`);
+
+    try {
+      const txHash = await mintAndTransferTokens(walletAddress, amount, assetIdNum);
+
+      console.log('✅ Direct mint successful:', {
+        assetId: assetIdNum,
+        quantity: qty,
+        walletAddress,
+        txHash,
+      });
+
+      return res.status(200).json({
+        status: 'success',
+        assetId: assetIdNum,
+        quantity: qty,
+        walletAddress,
+        txHash,
+        amount: amount.toString(),
+      });
+    } catch (mintError) {
+      console.error('❌ Direct mint failed:', mintError.message);
+      return res.status(500).json({
+        status: 'error',
+        message: 'Minting failed',
+        error: mintError.message,
+        assetId: assetIdNum,
+        walletAddress,
+      });
+    }
+  } catch (error) {
+    console.error('Direct mint endpoint error:', error);
+    return res.status(500).json({
+      status: 'error',
+      message: error.message || 'Unknown error',
+    });
+  }
+});
+
 // Create asset for a merchant (auto-setup)
 app.post('/assets/create', async (req, res) => {
   const receivedToken = req.headers['x-forward-token'];
@@ -141,6 +222,13 @@ app.post('/forward-order', async (req, res) => {
   const shopifyOrder = req.body;
   const contractIdHeader = req.headers['x-contract-id'];
 
+  console.log('=== FORWARDER: Received Order ===');
+  console.log('Order ID:', shopifyOrder?.id);
+  console.log('Order Email:', shopifyOrder?.email);
+  console.log('Line Items Count:', shopifyOrder?.line_items?.length || 0);
+  console.log('Has Contract ID Header:', !!contractIdHeader);
+  console.log('APP_API_BASE_URL:', process.env.APP_API_BASE_URL ? 'SET' : 'NOT SET');
+
   try {
     // Parse the Shopify order JSON
     console.log('=== Processing Shopify Order ===');
@@ -178,8 +266,21 @@ app.post('/forward-order', async (req, res) => {
     console.log('Items:', parsedData.items.length, 'item(s)');
     parsedData.items.forEach((item, index) => {
       console.log(`  ${index + 1}. ${item.title} x${item.quantity} - ${item.price} ${parsedData.currency}`);
+      console.log(`     Product ID: ${item.productId || 'N/A'}`);
+      console.log(`     Asset ID: ${item.assetId ?? 'NOT FOUND'}`);
     });
     console.log('Timestamp:', parsedData.timestamp);
+
+    // Debug: Log raw order structure for wallet and properties
+    if (shopifyOrder.note_attributes) {
+      console.log('📝 Order note_attributes:', JSON.stringify(shopifyOrder.note_attributes, null, 2));
+    }
+    if (shopifyOrder.note) {
+      console.log('📝 Order note:', shopifyOrder.note);
+    }
+    if (shopifyOrder.line_items && shopifyOrder.line_items.length > 0) {
+      console.log('📦 First line item properties:', JSON.stringify(shopifyOrder.line_items[0].properties || [], null, 2));
+    }
 
     // Prepare response data (exclude rawOrder for cleaner response)
     const responseData = {
@@ -191,28 +292,6 @@ app.post('/forward-order', async (req, res) => {
       items: parsedData.items,
       timestamp: parsedData.timestamp
     };
-
-    // Determine config (tokensPerOrder, assetId)
-    let tokensPerOrder = null;
-    let assetId = null;
-    try {
-      if (contractIdHeader && process.env.APP_API_BASE_URL) {
-        const cfgRes = await fetch(`${process.env.APP_API_BASE_URL}/api/contracts/${contractIdHeader}`);
-        if (cfgRes.ok) {
-          const cfg = await cfgRes.json();
-          tokensPerOrder = typeof cfg.tokensPerOrder === 'number' ? cfg.tokensPerOrder : null;
-          assetId = typeof cfg.assetId === 'number' ? cfg.assetId : null;
-        }
-      }
-    } catch (e) {
-      console.warn('Config fetch failed, falling back to env:', e.message);
-    }
-    if (tokensPerOrder == null) {
-      tokensPerOrder = parseInt(process.env.TOKENS_PER_ORDER || '10', 10);
-    }
-    if (assetId == null) {
-      assetId = parseInt(process.env.ASSET_HUB_ASSET_ID || '1', 10);
-    }
 
     // Idempotency: mark pending
     try {
@@ -232,85 +311,190 @@ app.post('/forward-order', async (req, res) => {
       console.warn('Failed to record pending reward:', e.message)
     }
 
-    // Blockchain interaction
-    if (responseData.walletAddress) {
-      try {
-        console.log('=== Initiating Blockchain Transaction ===');
-        
-        // Initialize Polkadot connection
-        await initPolkadot();
-        
-        // Fixed-per-order: convert units to smallest denomination
-        const decimals = parseInt(process.env.TOKEN_DECIMALS || '12', 10);
-        const BN = require('@polkadot/util').BN;
-        const tokenAmount = new BN(tokensPerOrder).mul(new BN(10).pow(new BN(decimals)));
-        
-        console.log(`Calculated token amount: ${tokenAmount.toString()} (${tokensPerOrder} tokens/order)`);
-        
-        // Mint tokens and send to customer wallet
-        const txHash = await mintAndTransferTokens(
-          responseData.walletAddress,
-          tokenAmount,
-          assetId
-        );
-        
-        responseData.transactionHash = txHash;
-        responseData.tokenAmount = tokenAmount.toString();
-        responseData.tokensPerOrder = tokensPerOrder;
-        responseData.assetId = assetId;
-        
-        console.log('✓ Blockchain transaction successful!');
-        console.log('Transaction Hash:', txHash);
-        console.log('Tokens sent:', tokenAmount.toString());
-        
-        try {
-          if (process.env.APP_API_BASE_URL && contractIdHeader) {
-            await fetch(`${process.env.APP_API_BASE_URL}/api/rewards`, {
-              method: 'POST',
+    // Try to look up asset IDs from database if not found in order
+    const itemsWithAssets = [];
+    const itemsNeedingLookup = [];
+
+    for (const item of parsedData.items) {
+      if (item.assetId != null) {
+        itemsWithAssets.push(item);
+      } else if (item.productId != null && process.env.APP_API_BASE_URL) {
+        // Try to look up asset ID from product database
+        itemsNeedingLookup.push(item);
+      }
+    }
+
+    // Look up missing asset IDs from database
+    if (itemsNeedingLookup.length > 0) {
+      if (!process.env.APP_API_BASE_URL) {
+        console.error('❌ CRITICAL: Cannot lookup asset IDs - APP_API_BASE_URL not set!');
+        console.error('   Items needing lookup:', itemsNeedingLookup.map(i => i.title).join(', '));
+        console.error('   Set APP_API_BASE_URL in forwarder environment to enable database lookup');
+      } else {
+        console.log(`🔍 Looking up ${itemsNeedingLookup.length} missing asset ID(s) from database...`);
+        for (const item of itemsNeedingLookup) {
+          try {
+            // Convert Shopify product ID to our format (gid://shopify/Product/XXXXX)
+            const shopifyProductId = item.productId;
+            const fullProductId = shopifyProductId.toString().startsWith('gid://')
+              ? shopifyProductId
+              : `gid://shopify/Product/${shopifyProductId}`;
+
+            const lookupUrl = `${process.env.APP_API_BASE_URL}/api/products/tokens?productId=${encodeURIComponent(fullProductId)}`;
+            console.log(`   Looking up: ${lookupUrl}`);
+            
+            const lookupRes = await fetch(lookupUrl, {
               headers: { 'content-type': 'application/json' },
-              body: JSON.stringify({
-                contractId: parseInt(String(contractIdHeader), 10),
-                orderId: parsedData.orderId,
-                wallet: parsedData.walletAddress || null,
-                amount: tokenAmount.toString(),
-                assetId: assetId,
-                status: 'success',
-                txHash
-              })
-            })
+            });
+
+            if (lookupRes.ok) {
+              const tokenData = await lookupRes.json();
+              if (tokenData.assetId) {
+                item.assetId = parseInt(tokenData.assetId, 10);
+                itemsWithAssets.push(item);
+                console.log(`✓ Found asset ID ${item.assetId} for product ${fullProductId} from database`);
+              } else {
+                console.log(`⚠️ No asset ID in database for product ${fullProductId}`);
+              }
+            } else {
+              const errorText = await lookupRes.text().catch(() => '');
+              console.log(`⚠️ Failed to lookup asset ID for product ${fullProductId}: ${lookupRes.status} - ${errorText.substring(0, 200)}`);
+            }
+          } catch (lookupError) {
+            console.warn(`Failed to lookup asset ID for product ${item.productId}:`, lookupError.message);
           }
-        } catch (e) {
-          console.warn('Failed to record success reward:', e.message)
-        }
-        
-      } catch (blockchainError) {
-        console.error('=== Blockchain Transaction Error ===');
-        console.error('Error:', blockchainError.message);
-        console.error('Stack:', blockchainError.stack);
-        
-        // Don't fail the entire request, but log the error
-        responseData.blockchainError = blockchainError.message;
-        responseData.transactionHash = null;
-        responseData.tokenAmount = null;
-        
-        try {
-          if (process.env.APP_API_BASE_URL && contractIdHeader) {
-            await fetch(`${process.env.APP_API_BASE_URL}/api/rewards`, {
-              method: 'POST',
-              headers: { 'content-type': 'application/json' },
-              body: JSON.stringify({
-                contractId: parseInt(String(contractIdHeader), 10),
-                orderId: parsedData.orderId,
-                wallet: parsedData.walletAddress || null,
-                status: 'failed',
-                error: blockchainError.message
-              })
-            })
-          }
-        } catch (e) {
-          console.warn('Failed to record failed reward:', e.message)
         }
       }
+    }
+
+    // Log all items and their asset IDs for debugging
+    console.log('=== Item Asset ID Analysis ===');
+    parsedData.items.forEach((item, idx) => {
+      console.log(`Item ${idx + 1}: ${item.title}`);
+      console.log(`  - Asset ID: ${item.assetId ?? 'NOT FOUND'}`);
+      console.log(`  - Quantity: ${item.quantity}`);
+      console.log(`  - Product ID: ${item.productId ?? 'N/A'}`);
+    });
+    console.log(`Total items with asset IDs: ${itemsWithAssets.length}`);
+
+    // Blockchain interaction
+    if (!responseData.walletAddress) {
+      console.error('❌ CRITICAL: No wallet address found in order!');
+      console.error('   Wallet address is required to mint tokens.');
+      console.error('   Make sure wallet address is passed in cart attributes during checkout.');
+    } else if (itemsWithAssets.length === 0) {
+      console.error('❌ CRITICAL: No items with asset IDs found!');
+      console.error('   Wallet address:', responseData.walletAddress);
+      console.error('   Total items:', parsedData.items.length);
+      console.error('   Items with asset IDs:', 0);
+      console.error('   This could mean:');
+      console.error('     1. Asset IDs not set in cart attributes');
+      console.error('     2. Asset IDs not found in order properties');
+      console.error('     3. Database lookup failed or APP_API_BASE_URL not set');
+    }
+
+    if (responseData.walletAddress && itemsWithAssets.length > 0) {
+      console.log(`🎯 Found ${itemsWithAssets.length} item(s) with asset IDs, preparing mints...`);
+      const BN = require('@polkadot/util').BN;
+      const decimals = parseInt(process.env.TOKEN_DECIMALS || '12', 10);
+      const multiplier = new BN(10).pow(new BN(decimals));
+      const mintResults = [];
+      const mintFailures = [];
+
+      try {
+        console.log('=== Initializing Polkadot connection for per-item minting ===');
+        await initPolkadot();
+
+        for (const item of itemsWithAssets) {
+          const assetIdForItem = parseInt(String(item.assetId), 10);
+          if (!Number.isFinite(assetIdForItem)) {
+            console.warn('Skipping item with invalid asset ID:', item.assetId, item.title);
+            continue;
+          }
+
+          const quantity = Number.isFinite(item.quantity) ? Math.max(1, item.quantity) : 1;
+          const amount = new BN(quantity).mul(multiplier);
+
+          console.log(`➡️ Minting asset ${assetIdForItem} x${quantity} for wallet ${responseData.walletAddress}`);
+
+          try {
+            const txHash = await mintAndTransferTokens(
+              responseData.walletAddress,
+              amount,
+              assetIdForItem
+            );
+
+            mintResults.push({
+              assetId: assetIdForItem,
+              quantity,
+              amount: amount.toString(),
+              txHash,
+              title: item.title || null,
+            });
+
+            console.log('✓ Mint successful', {
+              assetId: assetIdForItem,
+              quantity,
+              txHash,
+            });
+          } catch (mintError) {
+            console.error('❌ Mint failed for asset', assetIdForItem, mintError.message);
+            mintFailures.push({
+              assetId: assetIdForItem,
+              quantity,
+              error: mintError.message,
+              title: item.title || null,
+            });
+          }
+        }
+      } catch (setupError) {
+        console.error('=== Blockchain Setup Error ===');
+        console.error('Error:', setupError.message);
+        console.error('Stack:', setupError.stack);
+        mintFailures.push({
+          assetId: null,
+          quantity: null,
+          error: setupError.message,
+        });
+      }
+
+      responseData.mintResults = mintResults;
+      if (mintFailures.length) {
+        responseData.mintFailures = mintFailures;
+      }
+
+      const rewardStatus = mintFailures.length ? 'failed' : 'success';
+      const rewardPayload = {
+        contractId: contractIdHeader ? parseInt(String(contractIdHeader), 10) : undefined,
+        orderId: parsedData.orderId,
+        wallet: parsedData.walletAddress || null,
+        amount: JSON.stringify({
+          results: mintResults,
+          failures: mintFailures,
+        }),
+        assetId: mintResults.length === 1 ? mintResults[0].assetId : null,
+        status: rewardStatus,
+        txHash: mintResults.length === 1 ? mintResults[0].txHash : null,
+        error: mintFailures.length ? mintFailures.map((f) => f.error).join("; ") : null,
+      };
+
+      if (process.env.APP_API_BASE_URL && contractIdHeader) {
+        try {
+          await fetch(`${process.env.APP_API_BASE_URL}/api/rewards`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify(rewardPayload),
+          });
+        } catch (rewardError) {
+          console.warn('Failed to record reward status:', rewardError.message);
+        }
+      }
+
+      if (mintFailures.length) {
+        console.error('⚠️ Some mints failed', mintFailures);
+      }
+    } else if (responseData.walletAddress) {
+      console.log('ℹ Wallet address provided but no asset IDs found on items. Skipping mint.');
     } else {
       console.log('ℹ No wallet address provided, skipping blockchain transaction');
     }

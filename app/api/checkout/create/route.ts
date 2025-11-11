@@ -9,6 +9,11 @@ const CART_CREATE_MUTATION = `
       cart {
         id
         checkoutUrl
+        note
+        attributes {
+          key
+          value
+        }
       }
       userErrors {
         field
@@ -21,12 +26,13 @@ const CART_CREATE_MUTATION = `
 interface LineItem {
   variantId: string
   quantity: number
+  assetId?: number | string | null
 }
 
 export async function POST(req: Request) {
   try {
     const body = await req.json()
-    const { shop, lineItems } = body
+    const { shop, lineItems, walletAddress } = body
 
     if (!shop) {
       return Response.json(
@@ -71,6 +77,9 @@ export async function POST(req: Request) {
 
     // Create cart with requested merchandise
     console.log("🛒 Creating cart for shop:", cleanShop)
+    if (walletAddress) {
+      console.log("🔐 Attaching wallet address to cart:", walletAddress)
+    }
     const createResponse = await fetch(graphqlUrl, {
       method: "POST",
       headers: {
@@ -81,10 +90,47 @@ export async function POST(req: Request) {
         query: CART_CREATE_MUTATION,
         variables: {
           input: {
-            lines: lineItems.map((item: LineItem) => ({
-              merchandiseId: item.variantId,
-              quantity: item.quantity,
-            })),
+            attributes:
+              walletAddress && typeof walletAddress === "string"
+                ? [
+                    {
+                      key: "wallet_address",
+                      value: walletAddress,
+                    },
+                    {
+                      key: "_wallet",
+                      value: walletAddress,
+                    },
+                  ]
+                : undefined,
+            note: walletAddress && typeof walletAddress === "string"
+              ? `Wallet: ${walletAddress}`
+              : undefined,
+            lines: lineItems.map((item: LineItem) => {
+              const lineAttributes =
+                item.assetId !== undefined && item.assetId !== null
+                  ? [
+                      {
+                        key: "asset_id",
+                        value: String(item.assetId),
+                      },
+                      {
+                        key: "_asset_id",
+                        value: String(item.assetId),
+                      },
+                      {
+                        key: "assetId",
+                        value: String(item.assetId),
+                      },
+                    ]
+                  : undefined
+
+              return {
+                merchandiseId: item.variantId,
+                quantity: item.quantity,
+                attributes: lineAttributes,
+              }
+            }),
           },
         },
       }),
@@ -129,14 +175,35 @@ export async function POST(req: Request) {
       )
     }
 
-    console.log("✅ Cart created:", cartId, "checkoutUrl:", checkoutUrl)
+    // Append return URL for successful checkout
+    // Shopify checkout supports return_to parameter for post-purchase redirect
+    const appUrl = process.env.APP_URL || process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"
+    const returnUrl = `${appUrl}/checkout/success`
+    
+    try {
+      const checkoutUrlWithReturn = new URL(checkoutUrl)
+      // Add return_to parameter for successful checkout
+      checkoutUrlWithReturn.searchParams.set("return_to", returnUrl)
+      
+      console.log("✅ Cart created:", cartId)
+      console.log("🔗 Checkout URL with return:", checkoutUrlWithReturn.toString())
 
-    return Response.json({
-      success: true,
-      cartId,
-      webUrl: checkoutUrl,
-      checkoutUrl,
-    })
+      return Response.json({
+        success: true,
+        cartId,
+        webUrl: checkoutUrlWithReturn.toString(),
+        checkoutUrl: checkoutUrlWithReturn.toString(),
+      })
+    } catch (urlError) {
+      // If URL parsing fails, return original checkout URL
+      console.warn("⚠️ Failed to parse checkout URL, using original:", urlError)
+      return Response.json({
+        success: true,
+        cartId,
+        webUrl: checkoutUrl,
+        checkoutUrl,
+      })
+    }
   } catch (error) {
     console.error("❌ Checkout API error:", error)
     return Response.json(

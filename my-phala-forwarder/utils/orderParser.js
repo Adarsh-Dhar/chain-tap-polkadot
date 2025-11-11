@@ -153,8 +153,88 @@ function extractLineItems(order) {
     variantId: item.variant_id || null,
     productId: item.product_id || null,
     sku: item.sku || null,
-    variantTitle: item.variant_title || null
+    variantTitle: item.variant_title || null,
+    assetId: extractAssetId(item)
   }));
+}
+
+/**
+ * Extract asset ID from line item properties
+ * @param {object} item - Shopify line item
+ * @returns {number|null}
+ */
+function extractAssetId(item) {
+  if (!item) {
+    return null;
+  }
+
+  // Try 1: properties array (from cart attributes converted to order properties)
+  if (Array.isArray(item.properties)) {
+    const assetProperty = item.properties.find(
+      prop => {
+        const name = String(prop?.name || '').toLowerCase().trim();
+        return name === 'asset_id' || 
+               name === 'assetid' ||
+               name === 'asset-id' ||
+               name === 'asset id';
+      }
+    );
+
+    if (assetProperty && assetProperty.value != null) {
+      const value = String(assetProperty.value).trim();
+      const parsed = parseInt(value, 10);
+      if (Number.isFinite(parsed)) {
+        console.log(`✓ Found asset ID ${parsed} in properties for item: ${item.title || item.name}`);
+        return parsed;
+      }
+    }
+  }
+
+  // Try 2: variant properties (if cart attributes are stored differently)
+  if (item.variant && Array.isArray(item.variant.properties)) {
+    const assetProperty = item.variant.properties.find(
+      prop => {
+        const name = String(prop?.name || '').toLowerCase().trim();
+        return name === 'asset_id' || name === 'assetid';
+      }
+    );
+
+    if (assetProperty && assetProperty.value != null) {
+      const value = String(assetProperty.value).trim();
+      const parsed = parseInt(value, 10);
+      if (Number.isFinite(parsed)) {
+        console.log(`✓ Found asset ID ${parsed} in variant properties for item: ${item.title || item.name}`);
+        return parsed;
+      }
+    }
+  }
+
+  // Try 3: metafields (if asset ID is stored as metafield)
+  if (item.metafields && Array.isArray(item.metafields)) {
+    const assetMetafield = item.metafields.find(
+      field => {
+        const key = String(field?.key || '').toLowerCase();
+        return key === 'asset_id' || key === 'assetid';
+      }
+    );
+
+    if (assetMetafield && assetMetafield.value != null) {
+      const value = String(assetMetafield.value).trim();
+      const parsed = parseInt(value, 10);
+      if (Number.isFinite(parsed)) {
+        console.log(`✓ Found asset ID ${parsed} in metafields for item: ${item.title || item.name}`);
+        return parsed;
+      }
+    }
+  }
+
+  // Debug: log if no asset ID found
+  console.log(`⚠️ No asset ID found for item: ${item.title || item.name || 'Unknown'}`);
+  if (item.properties && Array.isArray(item.properties) && item.properties.length > 0) {
+    console.log(`   Available properties:`, item.properties.map(p => `${p.name}=${p.value}`).join(', '));
+  }
+
+  return null;
 }
 
 /**
