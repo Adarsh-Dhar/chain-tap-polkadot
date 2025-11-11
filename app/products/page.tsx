@@ -1205,7 +1205,7 @@ export default function ProductsPage() {
                         className="w-full"
                         variant="default"
                         size="sm"
-                        disabled={creatingCheckout || (() => {
+                        disabled={creatingCheckout || !assetId || (() => {
                           const inv = getAvailableInventory(product)
                           return inv !== null && inv === 0
                         })()}
@@ -1215,18 +1215,17 @@ export default function ProductsPage() {
                             <Loader2 className="h-4 w-4 mr-2 animate-spin" />
                             Creating Checkout...
                           </>
-                        ) : (
-                          "Buy"
-                        )}
+                        ) : assetId ? "Buy" : "Create Token First"}
                       </Button>
                       <Button
                         onClick={() => handleAddToCart(product)}
                         className="w-full"
                         variant="outline"
                         size="sm"
+                        disabled={!assetId}
                       >
                         <ShoppingCart className="h-4 w-4 mr-2" />
-                        Add to Cart
+                        {assetId ? "Add to Cart" : "Create Token First"}
                       </Button>
                       {assetId && isConnected && selectedAccount?.address && (
                         <Button
