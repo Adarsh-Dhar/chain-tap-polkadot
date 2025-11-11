@@ -71,24 +71,52 @@ export async function POST(req: Request) {
     const endpoint = phatUrl.replace(/\/$/, "")
     
     // Try direct mint endpoint first (simpler and more reliable)
-    const directMintUrl = `${endpoint}/mint`
-    const forwardUrl = `${endpoint}/forward-order`
+    const mintPath = process.env.PHAT_MINT_PATH || "/mint"
+    const forwardPath = process.env.PHAT_FORWARD_PATH || "/forward-order"
+    const directMintUrl = `${endpoint}${mintPath}`
+    const forwardUrl = `${endpoint}${forwardPath}`
 
     console.log("🔄 [MANUAL MINT] Attempting direct mint at:", directMintUrl)
 
     try {
+      // Helper to POST and extract error text/json
+      const postJson = async (url: string, payload: any) => {
+        const res = await fetch(url, {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "x-forward-token": forwardToken,
+          },
+          body: JSON.stringify(payload),
+        })
+        return res
+      }
+      const extractError = async (res: Response) => {
+        try {
+          const data = await res.json()
+          return data
+        } catch {
+          try {
+            const text = await res.text()
+            return { error: text || "Unknown error" }
+          } catch {
+            return { error: "Unknown error" }
+          }
+        }
+      }
+      const errorDigest = async (res: Response, data: any) => ({
+        status: res.status,
+        statusText: (res as any).statusText,
+        url: (res as any).url,
+        contentType: res.headers.get("content-type"),
+        details: data?.error || data?.message || "Unknown error",
+      })
+
       // Try direct mint endpoint first
-      const directResponse = await fetch(directMintUrl, {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          "x-forward-token": forwardToken,
-        },
-        body: JSON.stringify({
-          assetId,
-          walletAddress,
-          quantity,
-        }),
+      const directResponse = await postJson(directMintUrl, {
+        assetId,
+        walletAddress,
+        quantity,
       })
 
       if (directResponse.ok) {
@@ -102,14 +130,94 @@ export async function POST(req: Request) {
         })
       }
 
-      // If direct mint fails, return the error (don't try fallback to avoid confusion)
-      const errorData = await directResponse.json().catch(() => ({ error: await directResponse.text().catch(() => "Unknown error") }))
-      console.error("❌ [MANUAL MINT] Direct mint failed:", errorData)
-      
+      // If direct mint fails, attempt alternative paths and fallback via forward-order when appropriate
+      let directErrorData: any = await extractError(directResponse)
+      let directErrorInfo = await errorDigest(directResponse, directErrorData)
+      console.error("❌ [MANUAL MINT] Direct mint failed:", directErrorData)
+
+      // If 404/405, try alternate mint path: /api/mint
+      let altMintTried = false
+      if (directResponse.status === 404 || directResponse.status === 405) {
+        const altMintUrl = `${endpoint}/api/mint`
+        if (altMintUrl !== directMintUrl) {
+          altMintTried = true
+          console.log("🔄 [MANUAL MINT] Retrying direct mint at alternate path:", altMintUrl)
+          const altMintRes = await postJson(altMintUrl, {
+            assetId,
+            walletAddress,
+            quantity,
+          })
+          if (altMintRes.ok) {
+            const result = await altMintRes.json()
+            console.log("✅ [MANUAL MINT] Direct mint (alternate path) success:", result)
+            return NextResponse.json({
+              success: true,
+              message: "Token minted successfully",
+              txHash: result.txHash,
+              result,
+            })
+          }
+          const altData = await extractError(altMintRes)
+          directErrorData = altData
+          directErrorInfo = await errorDigest(altMintRes, altData)
+          console.error("❌ [MANUAL MINT] Alternate mint path failed:", altData)
+        }
+      }
+
+      // Fallback only for 404/405 or explicit unsupported errors
+      if (directResponse.status === 404 || directResponse.status === 405 || altMintTried) {
+        console.log("↪️ [MANUAL MINT] Falling back to forward-order at:", forwardUrl)
+        // Forwarder expects the raw order object as the request body
+        const forwardResponse = await postJson(forwardUrl, mockOrder)
+
+        if (forwardResponse.ok) {
+          const forwardResult = await forwardResponse.json()
+          console.log("✅ [MANUAL MINT] Forward-order success:", forwardResult)
+          return NextResponse.json({
+            success: true,
+            message: "Token mint forwarded successfully",
+            result: forwardResult,
+          })
+        }
+
+        // Try alternate forward path: /api/forward-order
+        const altForwardUrl = `${endpoint}/api/forward-order`
+        console.log("↪️ [MANUAL MINT] Trying alternate forward-order path:", altForwardUrl)
+        const altForwardRes = await postJson(altForwardUrl, mockOrder)
+        if (altForwardRes.ok) {
+          const forwardResult = await altForwardRes.json()
+          console.log("✅ [MANUAL MINT] Forward-order (alternate path) success:", forwardResult)
+          return NextResponse.json({
+            success: true,
+            message: "Token mint forwarded successfully",
+            result: forwardResult,
+          })
+        }
+
+        // Fallback failed as well; aggregate errors
+        const forwardErrorData = await extractError(forwardResponse)
+        const forwardErrorInfo = await errorDigest(forwardResponse, forwardErrorData)
+        const altForwardErrorData = await extractError(altForwardRes)
+        const altForwardErrorInfo = await errorDigest(altForwardRes, altForwardErrorData)
+        console.error("❌ [MANUAL MINT] Forward-order failed:", forwardErrorData)
+        console.error("❌ [MANUAL MINT] Forward-order (alternate) failed:", altForwardErrorData)
+        return NextResponse.json(
+          {
+            error: "Minting failed (fallback attempted)",
+            details: forwardErrorInfo,
+            directError: directErrorInfo,
+            altForwardError: altForwardErrorInfo,
+            status: forwardResponse.status || altForwardRes.status,
+          },
+          { status: forwardResponse.status || altForwardRes.status || 500 }
+        )
+      }
+
+      // Non-fallback-eligible errors: return direct failure details
       return NextResponse.json(
-        { 
-          error: "Minting failed", 
-          details: errorData.error || errorData.message || "Unknown error",
+        {
+          error: "Minting failed",
+          details: directErrorInfo,
           status: directResponse.status,
         },
         { status: directResponse.status || 500 }

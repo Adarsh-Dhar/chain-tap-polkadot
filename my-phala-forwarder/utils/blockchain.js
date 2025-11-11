@@ -242,16 +242,11 @@ async function mintAndTransferTokens(recipientAddress, amount, assetId) {
     }
     console.log(`✓ Signer has permission to mint (${assetCheck.isIssuer ? 'Issuer' : 'Admin'})`);
 
-    // Step 3: Get account info for nonce
-    const accountInfo = await api.query.system.account(wallet.address);
-    const nonce = accountInfo.nonce;
-
-    // Step 4: Construct and send transaction
+    // Step 3: Construct and send transaction (let API manage nonce)
     console.log('=== Constructing Mint Transaction ===');
     console.log(`Asset ID: ${assetId}`);
     console.log(`Amount: ${amount.toString()} (smallest units)`);
     console.log(`Recipient: ${recipientAddress}`);
-    console.log(`Nonce: ${nonce.toString()}`);
 
     // Construct transaction: assets.mint(assetId, recipientAddress, amount)
     const tx = api.tx.assets.mint(assetId, recipientAddress, amount);
@@ -278,7 +273,7 @@ async function mintAndTransferTokens(recipientAddress, amount, assetId) {
       }, 60000); // 60 second timeout
 
       console.log('=== Sending Transaction ===');
-      tx.signAndSend(wallet, { nonce }, ({ status, txHash, events, dispatchError }) => {
+      tx.signAndSend(wallet, ({ status, txHash, events, dispatchError }) => {
         if (dispatchError) {
           clearTimeout(timeout);
           let errorMessage = 'Transaction failed: ';
@@ -356,10 +351,6 @@ async function transferTokens(recipientAddress, amount, assetId) {
   }
 
   try {
-    // Get account info for nonce
-    const accountInfo = await api.query.system.account(wallet.address);
-    const nonce = accountInfo.nonce;
-
     console.log(`Constructing transfer transaction: Asset ${assetId}, Amount: ${amount.toString()}, Recipient: ${recipientAddress}`);
 
     // Construct transaction: assets.transfer(assetId, recipientAddress, amount)
@@ -371,7 +362,7 @@ async function transferTokens(recipientAddress, amount, assetId) {
         reject(new Error('Transaction timeout: Transaction not confirmed within 60 seconds'));
       }, 60000); // 60 second timeout
 
-      tx.signAndSend(wallet, { nonce }, ({ status, txHash, events, dispatchError }) => {
+      tx.signAndSend(wallet, ({ status, txHash, events, dispatchError }) => {
         if (dispatchError) {
           clearTimeout(timeout);
           if (dispatchError.isModule) {

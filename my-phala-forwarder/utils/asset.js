@@ -421,10 +421,6 @@ async function createAssetIfMissing(desiredAssetId, metadata) {
   // Verify API is ready
   await api.isReady;
   
-  // Query nonce BEFORE constructing Promise (same pattern as minting)
-  const accountInfo = await api.query.system.account(wallet.address);
-  const nonce = accountInfo.nonce;
-  console.log(`Account nonce: ${nonce.toString()}`);
   console.log(`Wallet address: ${wallet.address}`);
   
   // Construct transaction (same pattern as minting - outside Promise)
@@ -467,7 +463,8 @@ async function createAssetIfMissing(desiredAssetId, metadata) {
     // Use wallet from getWallet() to ensure we're using the exact same instance as minting
     const signingWallet = getWallet() || wallet;
     console.log(`Signing with wallet: ${signingWallet.address}`);
-    tx.signAndSend(signingWallet, { nonce, tip: 2000000000 }, ({ status, txHash, dispatchError, events }) => {
+    // Let API manage nonce automatically to avoid future/stuck transactions due to pending pool
+    tx.signAndSend(signingWallet, { tip: 2000000000 }, ({ status, txHash, dispatchError, events }) => {
       // Capture txHash as soon as we get it
       if (txHash && !transactionHash) {
         transactionHash = txHash.toString();
