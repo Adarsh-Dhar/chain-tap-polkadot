@@ -10,15 +10,12 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
 } from "@/components/ui/sidebar"
-import { LayoutDashboard, Settings, Activity, Zap, Users, BarChart3 } from "lucide-react"
+import { LayoutDashboard, ShoppingCart, Package } from "lucide-react"
 
 const menuItems = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/integrations", label: "Integrations", icon: Zap },
-  { href: "/activity", label: "Activity", icon: Activity },
-  { href: "/analytics", label: "Analytics", icon: BarChart3 },
-  { href: "/team", label: "Team", icon: Users },
-  { href: "/settings", label: "Settings", icon: Settings },
+  { href: "/products", label: "Products", icon: Package },
+  { href: "/market", label: "Market", icon: ShoppingCart },
 ]
 
 export default function AppSidebar() {
