@@ -1,6 +1,6 @@
 import { render } from 'preact';
 import { useState, useEffect } from 'preact/hooks';
-import '@shopify/ui-extensions/preact';
+import '@shopify/ui-extensions/checkout';
 
 // This is the standard entry point for the extension
 export default function extension() {

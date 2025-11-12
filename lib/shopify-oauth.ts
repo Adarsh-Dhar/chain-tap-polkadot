@@ -40,7 +40,7 @@ function getAppUrlFromToml(): string {
 // Prioritize TOML over environment variables
 const SHOPIFY_CLIENT_ID = getClientIdFromToml() || process.env.SHOPIFY_CLIENT_ID || ""
 const SHOPIFY_CLIENT_SECRET = process.env.SHOPIFY_CLIENT_SECRET || ""
-const SHOPIFY_SCOPES = process.env.SHOPIFY_SCOPES || "read_products,write_products,read_orders"
+const SHOPIFY_SCOPES = process.env.SHOPIFY_SCOPES || "read_products,write_products,read_orders,write_price_rules"
 const APP_URL = getAppUrlFromToml() || process.env.APP_URL || process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"
 
 /**

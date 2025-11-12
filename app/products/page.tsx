@@ -166,6 +166,8 @@ export default function ProductsPage() {
     type: "success" | "error" | "info" | null
     message: string
   } | null>(null)
+  const [totalTokens, setTotalTokens] = useState<number>(0)
+  const [totalStock, setTotalStock] = useState<number>(0)
 
   useEffect(() => {
     async function fetchProducts() {
@@ -396,6 +398,91 @@ export default function ProductsPage() {
       cancelled = true
     }
   }, [isConnected, selectedAccount?.address, productTokens, products])
+
+  // Calculate total stock when products change
+  useEffect(() => {
+    if (products.length === 0) {
+      setTotalStock(0)
+      return
+    }
+
+    let totalInventory = 0
+    products.forEach((product) => {
+      // First try to use totalInventory at product level
+      if (product.totalInventory !== undefined && product.totalInventory !== null) {
+        totalInventory += product.totalInventory
+      } else if (product.variants?.edges && product.variants.edges.length > 0) {
+        // If not available, sum up variant inventory quantities
+        const variantTotal = product.variants.edges.reduce((sum, edge) => {
+          const variant = edge.node
+          if (variant.inventoryQuantity !== undefined && variant.inventoryQuantity !== null) {
+            return sum + variant.inventoryQuantity
+          }
+          return sum
+        }, 0)
+        totalInventory += variantTotal
+      }
+    })
+
+    setTotalStock(totalInventory)
+    console.log("📦 [STOCK] Total stock across all products:", totalInventory, "items")
+  }, [products])
+
+  // Calculate total tokens from all balances
+  useEffect(() => {
+    if (!isConnected || !selectedAccount?.address) {
+      setTotalTokens(0)
+      return
+    }
+
+    // Sum up all token balances
+    let total = 0
+    tokenBalances.forEach((balanceInfo) => {
+      if (balanceInfo.balanceFormatted && !balanceInfo.error) {
+        const balance = parseFloat(balanceInfo.balanceFormatted)
+        if (!isNaN(balance)) {
+          total += balance
+        }
+      }
+    })
+    setTotalTokens(total)
+  }, [tokenBalances, isConnected, selectedAccount?.address])
+
+  // Calculate and log discount percentage (y) using total tokens and total stock
+  useEffect(() => {
+    if (!isConnected || !selectedAccount?.address) {
+      return
+    }
+
+    // x = total tokens owned across all products
+    const x = totalTokens
+    
+    // X = total stock/inventory across all products
+    const X = totalStock
+
+    // Skip if we don't have valid values
+    if (x === 0 && X === 0) {
+      return // No data yet
+    }
+
+    if (X === 0 || X === null) {
+      console.log("🎯 [DISCOUNT] Cannot calculate discount: No inventory data available")
+      return
+    }
+
+    // Calculate y = 0.90 * (x / X)^2
+    const p = x / X // Percentage owned
+    const y = 0.90 * Math.pow(p, 2) // Discount percentage
+    const yPercent = (y * 100).toFixed(2) // Convert to percentage for display
+
+    console.log("🎯 [DISCOUNT] Calculating discount percentage (y):", {
+      x: `${x} tokens (total tokens owned across all products)`,
+      X: `${X} inventory (total stock across all products)`,
+      p: `${(p * 100).toFixed(2)}% owned`,
+      y: `${yPercent}% discount`,
+      formula: `y = 0.90 * (${x} / ${X})^2 = ${yPercent}%`
+    })
+  }, [totalTokens, totalStock, isConnected, selectedAccount?.address])
 
   // Auto-mint tokens when confirmationId is present and wallet is connected
   useEffect(() => {
@@ -749,6 +836,24 @@ export default function ProductsPage() {
     setCreatingCheckout(true)
 
     try {
+      // Calculate discount percentage (y) before creating checkout
+      // Minimum discount: 1% (0.01) - discounts below this may round to $0.00 in Shopify
+      const MIN_DISCOUNT_PERCENTAGE = 0.01 // 1% minimum
+      let discountPercentage: number | null = null
+      if (totalStock > 0 && totalTokens >= 0) {
+        const p = totalTokens / totalStock // Percentage owned
+        const y = 0.90 * Math.pow(p, 2) // Discount percentage
+        // Only apply discount if it meets minimum threshold
+        discountPercentage = y >= MIN_DISCOUNT_PERCENTAGE ? y : null
+        console.log("🎯 [BUY] Calculated discount percentage:", {
+          totalTokens,
+          totalStock,
+          calculatedY: y,
+          minThreshold: MIN_DISCOUNT_PERCENTAGE,
+          discountPercentage: discountPercentage ? `${(discountPercentage * 100).toFixed(2)}%` : `Below minimum (${(MIN_DISCOUNT_PERCENTAGE * 100).toFixed(0)}%)`
+        })
+      }
+
       // Create checkout with line items
       const response = await fetch("/api/checkout/create", {
         method: "POST",
@@ -758,6 +863,7 @@ export default function ProductsPage() {
         body: JSON.stringify({
           shop,
           walletAddress: selectedAccount.address,
+          discountPercentage,
           lineItems: [
             {
               variantId: selectedVariant.id,
@@ -868,6 +974,24 @@ export default function ProductsPage() {
     setCreatingCheckout(true)
 
     try {
+      // Calculate discount percentage (y) before creating checkout
+      // Minimum discount: 1% (0.01) - discounts below this may round to $0.00 in Shopify
+      const MIN_DISCOUNT_PERCENTAGE = 0.01 // 1% minimum
+      let discountPercentage: number | null = null
+      if (totalStock > 0 && totalTokens >= 0) {
+        const p = totalTokens / totalStock // Percentage owned
+        const y = 0.90 * Math.pow(p, 2) // Discount percentage
+        // Only apply discount if it meets minimum threshold
+        discountPercentage = y >= MIN_DISCOUNT_PERCENTAGE ? y : null
+        console.log("🎯 [BUY CART] Calculated discount percentage:", {
+          totalTokens,
+          totalStock,
+          calculatedY: y,
+          minThreshold: MIN_DISCOUNT_PERCENTAGE,
+          discountPercentage: discountPercentage ? `${(discountPercentage * 100).toFixed(2)}%` : `Below minimum (${(MIN_DISCOUNT_PERCENTAGE * 100).toFixed(0)}%)`
+        })
+      }
+
       // Format line items for checkout
       const lineItems = cart.map((item) => ({
         variantId: item.variantId!,
@@ -884,6 +1008,7 @@ export default function ProductsPage() {
         body: JSON.stringify({
           shop,
           walletAddress: selectedAccount.address,
+          discountPercentage,
           lineItems,
         }),
       })
@@ -1114,6 +1239,40 @@ export default function ProductsPage() {
       />
 
       <div className="max-w-7xl mx-auto px-6 py-8">
+        {/* Total Tokens Card */}
+        {isConnected && selectedAccount?.address && (
+          <Card className="mb-6">
+            <CardContent className="pt-6">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 rounded-lg bg-primary/10">
+                    <Coins className="h-5 w-5 text-primary" />
+                  </div>
+                  <div>
+                    <p className="text-sm font-medium text-muted-foreground">Total Tokens Owned</p>
+                    <p className="text-2xl font-bold text-foreground">
+                      {loadingBalances.size > 0 ? (
+                        <span className="flex items-center gap-2">
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                          Loading...
+                        </span>
+                      ) : (
+                        totalTokens.toLocaleString(undefined, { maximumFractionDigits: 2 })
+                      )}
+                    </p>
+                  </div>
+                </div>
+                {tokenBalances.size > 0 && (
+                  <div className="text-right">
+                    <p className="text-xs text-muted-foreground">
+                      Across {tokenBalances.size} token{tokenBalances.size !== 1 ? "s" : ""}
+                    </p>
+                  </div>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+        )}
         {/* Mint Status Banner */}
         {(mintStatus || mintingOrder) && (
           <Alert
