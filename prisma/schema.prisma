@@ -61,6 +61,45 @@ model ProductToken {
 
   @@unique([productId])
   @@map("product_tokens")
+  TokenListing  TokenListing[]
+}
+
+model TokenListing {
+  id            Int      @id @default(autoincrement())
+  sellerAddress String   // Wallet address of the seller
+  assetId       Int      // Token asset ID
+  productId     String   // Reference to ProductToken
+  quantity      String   // Amount of tokens for sale (as string to handle large numbers)
+  pricePerToken String   // Price per token in native currency
+  totalPrice    String   // Calculated total price
+  status        String   // active | sold | cancelled
+  buyerAddress  String?  // Buyer's wallet address when sold
+  txHash        String?  // Transaction hash when sold
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  productToken  ProductToken? @relation(fields: [productId], references: [productId])
+  transactions  MarketTransaction[]
+
+  @@map("token_listings")
+}
+
+model MarketTransaction {
+  id            Int      @id @default(autoincrement())
+  listingId     Int      // Reference to TokenListing
+  sellerAddress String
+  buyerAddress  String
+  assetId       Int
+  quantity      String
+  pricePerToken String
+  totalPrice    String
+  txHash        String   // Blockchain transaction hash
+  status        String   // pending | completed | failed
+  createdAt     DateTime  @default(now())
+
+  listing       TokenListing @relation(fields: [listingId], references: [id])
+
+  @@map("market_transactions")
 }
 
 model ShopifySession {
