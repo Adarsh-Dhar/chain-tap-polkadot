@@ -836,23 +836,12 @@ export default function ProductsPage() {
     setCreatingCheckout(true)
 
     try {
-      // Calculate discount percentage (y) before creating checkout
-      // Minimum discount: 1% (0.01) - discounts below this may round to $0.00 in Shopify
-      const MIN_DISCOUNT_PERCENTAGE = 0.01 // 1% minimum
-      let discountPercentage: number | null = null
-      if (totalStock > 0 && totalTokens >= 0) {
-        const p = totalTokens / totalStock // Percentage owned
-        const y = 0.90 * Math.pow(p, 2) // Discount percentage
-        // Only apply discount if it meets minimum threshold
-        discountPercentage = y >= MIN_DISCOUNT_PERCENTAGE ? y : null
-        console.log("🎯 [BUY] Calculated discount percentage:", {
-          totalTokens,
-          totalStock,
-          calculatedY: y,
-          minThreshold: MIN_DISCOUNT_PERCENTAGE,
-          discountPercentage: discountPercentage ? `${(discountPercentage * 100).toFixed(2)}%` : `Below minimum (${(MIN_DISCOUNT_PERCENTAGE * 100).toFixed(0)}%)`
-        })
-      }
+      // TESTING: Hardcoded 10% discount for testing purposes
+      const discountPercentage: number = 0.10 // 10% hardcoded for testing
+      console.log("🎯 [BUY] Using hardcoded discount percentage for testing:", {
+        discountPercentage: `${(discountPercentage * 100).toFixed(0)}%`,
+        note: "Hardcoded for testing - will use calculated value in production"
+      })
 
       // Create checkout with line items
       const response = await fetch("/api/checkout/create", {
@@ -974,23 +963,12 @@ export default function ProductsPage() {
     setCreatingCheckout(true)
 
     try {
-      // Calculate discount percentage (y) before creating checkout
-      // Minimum discount: 1% (0.01) - discounts below this may round to $0.00 in Shopify
-      const MIN_DISCOUNT_PERCENTAGE = 0.01 // 1% minimum
-      let discountPercentage: number | null = null
-      if (totalStock > 0 && totalTokens >= 0) {
-        const p = totalTokens / totalStock // Percentage owned
-        const y = 0.90 * Math.pow(p, 2) // Discount percentage
-        // Only apply discount if it meets minimum threshold
-        discountPercentage = y >= MIN_DISCOUNT_PERCENTAGE ? y : null
-        console.log("🎯 [BUY CART] Calculated discount percentage:", {
-          totalTokens,
-          totalStock,
-          calculatedY: y,
-          minThreshold: MIN_DISCOUNT_PERCENTAGE,
-          discountPercentage: discountPercentage ? `${(discountPercentage * 100).toFixed(2)}%` : `Below minimum (${(MIN_DISCOUNT_PERCENTAGE * 100).toFixed(0)}%)`
-        })
-      }
+      // TESTING: Hardcoded 10% discount for testing purposes
+      const discountPercentage: number = 0.10 // 10% hardcoded for testing
+      console.log("🎯 [BUY CART] Using hardcoded discount percentage for testing:", {
+        discountPercentage: `${(discountPercentage * 100).toFixed(0)}%`,
+        note: "Hardcoded for testing - will use calculated value in production"
+      })
 
       // Format line items for checkout
       const lineItems = cart.map((item) => ({

@@ -61,7 +61,7 @@ export async function POST(req: Request) {
 
     // Step 1: Create price rule first (without discount codes)
     // Creating discount codes inline can cause timing issues
-    // For percentage discounts, value should be positive (Shopify applies it as discount automatically)
+    // For percentage discounts, value must be negative (between -100 and 0)
     const priceRuleData = {
       price_rule: {
         title: `Token Discount ${percentageValue.toFixed(2)}%`,
@@ -69,7 +69,7 @@ export async function POST(req: Request) {
         target_selection: "all",
         allocation_method: "across",
         value_type: "percentage",
-        value: percentageValue.toFixed(2), // Positive value for percentage discounts
+        value: (-percentageValue).toFixed(2), // Negative value required for discounts
         customer_selection: "all",
         starts_at: new Date().toISOString(),
         usage_limit: 1, // One-time use
