@@ -4,13 +4,16 @@
 /node_modules
 /my-phala-forwarder/node_modules/
 /extensions/adrs-checkout/node_modules/
+/local-fest-website/node_modules/
 
 # next.js
 /.next/
+/local-fest-website/.next/
 /out/
 
 # production
 /build
+/local-fest-website/build/
 
 # debug
 npm-debug.log*
