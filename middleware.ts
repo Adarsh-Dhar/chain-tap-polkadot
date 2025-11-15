@@ -8,6 +8,36 @@ import { NextRequest, NextResponse } from "next/server"
 export async function middleware(request: NextRequest) {
   const { pathname, searchParams } = request.nextUrl
 
+  // Handle CORS for VIP token API (called from local-fest-website)
+  // This MUST be checked BEFORE the general API skip check
+  if (pathname.startsWith("/api/vip/token")) {
+    // Handle preflight OPTIONS request
+    if (request.method === "OPTIONS") {
+      return new NextResponse(null, {
+        status: 200,
+        headers: {
+          "Access-Control-Allow-Origin": "*",
+          "Access-Control-Allow-Methods": "GET, OPTIONS",
+          "Access-Control-Allow-Headers": "Content-Type",
+          "Access-Control-Max-Age": "86400", // 24 hours
+        },
+      })
+    }
+    // For other methods, use rewrite to intercept the response
+    // This ensures CORS headers are added even if the route handler crashes
+    const response = NextResponse.next({
+      request: {
+        headers: new Headers(request.headers),
+      },
+    })
+    // Set CORS headers on the response - these will be preserved even on errors
+    response.headers.set("Access-Control-Allow-Origin", "*")
+    response.headers.set("Access-Control-Allow-Methods", "GET, OPTIONS")
+    response.headers.set("Access-Control-Allow-Headers", "Content-Type")
+    response.headers.set("Vary", "Origin")
+    return response
+  }
+
   // Skip middleware for:
   // - Auth routes (they handle their own logic)
   // - API routes (they handle auth themselves)
@@ -76,6 +106,9 @@ export const config = {
      * - _next/image (image optimization files)
      * - favicon.ico (favicon file)
      * - public files (public folder)
+     * 
+     * IMPORTANT: We explicitly include /api/vip/token routes for CORS
+     * The pattern matches all paths, and we handle VIP token routes specially
      */
     "/((?!api/auth|auth|_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico|css|js|woff|woff2|ttf|eot)).*)",
   ],

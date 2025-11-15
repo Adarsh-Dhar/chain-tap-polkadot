@@ -13,6 +13,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { useWallet } from '@/components/wallet-provider';
 import { useToast } from '@/hooks/use-toast';
+import { useVipAccess } from '@/hooks/use-vip-access';
 import { cn } from '@/lib/utils';
 
 function truncateAddress(address: string, start = 6, end = 4): string {
@@ -27,6 +28,7 @@ interface HeaderProps {
 export function Header({ onWalletConnect }: HeaderProps) {
   const { selectedAccount, accounts, isConnected, isConnecting, connect, disconnect, selectAccount } = useWallet();
   const { toast } = useToast();
+  const { hasVipAccess } = useVipAccess();
   const [copied, setCopied] = useState(false);
 
   const handleConnect = async () => {
@@ -102,13 +104,13 @@ export function Header({ onWalletConnect }: HeaderProps) {
 
         {/* Right Side - Wallet Button */}
         {!isConnected ? (
-          <Button
+            <Button
             onClick={handleConnect}
             disabled={isConnecting}
             className="bg-blue-500 hover:bg-blue-600 text-white flex items-center gap-2"
           >
             <Wallet className="w-4 h-4" />
-            {isConnecting ? 'Connecting...' : 'Connect Wallet for VIP Access'}
+            {isConnecting ? 'Connecting...' : 'Connect Wallet'}
           </Button>
         ) : selectedAccount ? (
           <div className="flex items-center gap-3">
@@ -173,10 +175,12 @@ export function Header({ onWalletConnect }: HeaderProps) {
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
-            <div className="px-3 py-2 bg-pink-500/20 border border-pink-500/40 rounded-full flex items-center gap-1 animate-pulse-pink">
-              <Star className="w-4 h-4 text-pink-400" />
-              <span className="text-xs font-semibold text-pink-300">VIP STATUS: ACTIVE</span>
-            </div>
+            {hasVipAccess && (
+              <div className="px-3 py-2 bg-pink-500/20 border border-pink-500/40 rounded-full flex items-center gap-1 animate-pulse-pink">
+                <Star className="w-4 h-4 text-pink-400" />
+                <span className="text-xs font-semibold text-pink-300">VIP STATUS: ACTIVE</span>
+              </div>
+            )}
           </div>
         ) : null}
       </nav>

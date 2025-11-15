@@ -1,12 +1,16 @@
 'use client';
 
-import { Check, Star, PartyPopper } from 'lucide-react';
+import { Check, Star, PartyPopper, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { useWallet } from '@/components/wallet-provider';
+import { useToast } from '@/hooks/use-toast';
+import { useVipAccess } from '@/hooks/use-vip-access';
 
 export function TicketSection() {
   const { isConnected } = useWallet();
+  const { toast } = useToast();
+  const { hasVipAccess, tokenBalanceFormatted, loading: vipLoading, tokenTitle } = useVipAccess();
 
   return (
     <section id="tickets" className="py-20 px-4 bg-background">
@@ -45,11 +49,11 @@ export function TicketSection() {
 
           {/* VIP Pass Card */}
           <Card className={`bg-card p-8 rounded-xl relative transition-all ${
-            isConnected 
+            hasVipAccess 
               ? 'border-2 border-blue-500 glow-blue' 
               : 'border border-white/10'
           }`}>
-            {isConnected && (
+            {hasVipAccess && (
               <div className="absolute top-4 right-4">
                 <div className="px-3 py-1 bg-pink-500/20 border border-pink-500 rounded-full flex items-center gap-1 animate-pulse-pink">
                   <PartyPopper className="w-4 h-4 text-pink-400" />
@@ -61,11 +65,29 @@ export function TicketSection() {
             <h3 className="text-2xl font-bold text-white mb-2">Community VIP Pass</h3>
             <p className="text-white/60 mb-6">Premium festival experience</p>
 
-            {isConnected && (
+            {vipLoading && isConnected && (
+              <div className="mb-4 p-3 bg-blue-500/10 border border-blue-500/30 rounded-lg flex items-center gap-2">
+                <Loader2 className="w-5 h-5 text-blue-400 animate-spin" />
+                <p className="text-sm text-blue-300">
+                  Checking token ownership...
+                </p>
+              </div>
+            )}
+
+            {!vipLoading && hasVipAccess && (
               <div className="mb-4 p-3 bg-green-500/10 border border-green-500/30 rounded-lg flex items-start gap-2">
                 <Check className="w-5 h-5 text-green-400 mt-0.5 flex-shrink-0" />
                 <p className="text-sm text-green-300">
-                  Verified! We see you hold 100+ $BEAN tokens from 'Rosie's Roasters'.
+                  Verified! You hold {tokenBalanceFormatted} tokens from {tokenTitle || 'Rosie\'s Roasters'}.
+                </p>
+              </div>
+            )}
+
+            {!vipLoading && isConnected && !hasVipAccess && (
+              <div className="mb-4 p-3 bg-yellow-500/10 border border-yellow-500/30 rounded-lg flex items-start gap-2">
+                <Star className="w-5 h-5 text-yellow-400 mt-0.5 flex-shrink-0" />
+                <p className="text-sm text-yellow-300">
+                  Connect your wallet and hold 100+ tokens from Rosie's Roasters to unlock VIP access.
                 </p>
               </div>
             )}
@@ -87,7 +109,17 @@ export function TicketSection() {
               ))}
             </ul>
 
-            <Button className="w-full bg-blue-500 hover:bg-blue-600 text-white font-semibold">
+            <Button 
+              className="w-full bg-blue-500 hover:bg-blue-600 text-white font-semibold"
+              onClick={() => {
+                // Show alert when VIP pass is used to buy a product
+                toast({
+                  title: '🎉 VIP Pass Purchase!',
+                  description: 'Thank you for purchasing with your VIP Pass! You\'ve unlocked exclusive benefits.',
+                  variant: 'default',
+                });
+              }}
+            >
               Buy VIP Pass ($50.00)
             </Button>
           </Card>

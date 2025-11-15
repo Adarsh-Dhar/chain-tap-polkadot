@@ -29,6 +29,7 @@ export async function GET(req: Request) {
     // Check if productId query parameter is provided
     const url = new URL(req.url)
     const productId = url.searchParams.get("productId")
+    const vipOnly = url.searchParams.get("vipOnly") === "true"
 
     if (productId) {
       // Query single product token
@@ -42,6 +43,9 @@ export async function GET(req: Request) {
           productId: true,
           assetId: true,
           title: true,
+          handle: true,
+          isVipToken: true,
+          vipTokenThreshold: true,
         },
       })
 
@@ -55,18 +59,29 @@ export async function GET(req: Request) {
       return NextResponse.json(token)
     }
 
+    // Build where clause
+    const whereClause: any = {
+      assetId: {
+        not: null,
+      },
+    }
+
+    // Filter for VIP tokens only if requested
+    if (vipOnly) {
+      whereClause.isVipToken = true
+    }
+
     // Fetch all product tokens
     const tokens = await productTokenModel.findMany({
       select: {
         productId: true,
         assetId: true,
         title: true,
+        handle: true,
+        isVipToken: true,
+        vipTokenThreshold: true,
       },
-      where: {
-        assetId: {
-          not: null,
-        },
-      },
+      where: whereClause,
       orderBy: {
         createdAt: 'desc',
       },
