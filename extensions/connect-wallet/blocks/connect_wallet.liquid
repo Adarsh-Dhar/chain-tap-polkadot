@@ -256,6 +256,32 @@
     return `${address.slice(0, start)}...${address.slice(-end)}`;
   }
 
+  // Helper function to update cart attributes with wallet address
+  async function updateCartAttributes(address) {
+    if (!address) return;
+    
+    try {
+      await fetch('/cart/update.js', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          attributes: {
+            'wallet_address': address,
+            '_wallet': address,
+            'wallet': address,
+            'Wallet Address': address
+          },
+          note: `Wallet: ${address}`
+        })
+      });
+      console.log("✅ Wallet address saved to cart attributes and note");
+      return true;
+    } catch (error) {
+      console.error('Failed to save wallet address to cart:', error);
+      return false;
+    }
+  }
+
   function updateUI() {
     if (selectedAccount) {
       connectBtn.classList.add('connected');
@@ -368,6 +394,9 @@
       selectedAccount = accountToSelect;
       localStorage.setItem(STORAGE_KEY, accountToSelect.address);
       
+      // Save wallet address to Shopify Cart Attributes (multiple formats for webhook compatibility)
+      await updateCartAttributes(accountToSelect.address);
+      
       updateUI();
       renderAccountsList();
       
@@ -382,19 +411,44 @@
     }
   }
 
-  function disconnect() {
+  async function disconnect() {
     selectedAccount = null;
     accounts = [];
     localStorage.removeItem(STORAGE_KEY);
+    
+    // Clear wallet address from cart
+    try {
+      await fetch('/cart/update.js', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          attributes: {
+            'wallet_address': '',
+            '_wallet': '',
+            'wallet': '',
+            'Wallet Address': ''
+          },
+          note: ''
+        })
+      });
+      console.log("✅ Wallet address cleared from cart");
+    } catch (error) {
+      console.error('Failed to clear wallet address from cart:', error);
+    }
+    
     updateUI();
     renderAccountsList();
     walletDropdown.style.display = 'none';
     dropdownOpen = false;
   }
 
-  function selectAccount(account) {
+  async function selectAccount(account) {
     selectedAccount = account;
     localStorage.setItem(STORAGE_KEY, account.address);
+    
+    // Update cart attributes when switching accounts
+    await updateCartAttributes(account.address);
+    
     updateUI();
     renderAccountsList();
     walletDropdown.style.display = 'none';
@@ -434,6 +488,10 @@
       if (savedAccount) {
         accounts = allAccounts;
         selectedAccount = savedAccount;
+        
+        // Restore wallet address to cart on page load
+        await updateCartAttributes(savedAccount.address);
+        
         updateUI();
         renderAccountsList();
       } else {
@@ -484,6 +542,21 @@
   // Initialize: try to reconnect to saved account
   if (typeof window !== 'undefined') {
     reconnectToSavedAccount();
+    
+    // Periodically sync wallet address to cart (in case cart was cleared or recreated)
+    // This ensures the wallet address is always in the cart before checkout
+    setInterval(() => {
+      if (selectedAccount && selectedAccount.address) {
+        updateCartAttributes(selectedAccount.address);
+      }
+    }, 30000); // Sync every 30 seconds
+    
+    // Also sync when page becomes visible (user returns to tab)
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden && selectedAccount && selectedAccount.address) {
+        updateCartAttributes(selectedAccount.address);
+      }
+    });
   }
 
   // Initial UI update

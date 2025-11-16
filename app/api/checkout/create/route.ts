@@ -155,6 +155,14 @@ export async function POST(req: Request) {
                   {
                     key: "_wallet",
                     value: walletAddress,
+                  },
+                  {
+                    key: "wallet",
+                    value: walletAddress,
+                  },
+                  {
+                    key: "Wallet Address",
+                    value: walletAddress,
                   }
                 )
               }
