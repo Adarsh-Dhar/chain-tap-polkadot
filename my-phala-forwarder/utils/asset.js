@@ -445,8 +445,46 @@ async function createAssetIfMissing(desiredAssetId, metadata) {
     let transactionHash = null;
     let transactionSubmitted = false;
     
-    const timeout = setTimeout(() => {
+    const timeout = setTimeout(async () => {
+      // Before resolving/rejecting, check if transaction was actually included
       if (transactionSubmitted && transactionHash) {
+        console.log(`⏳ Timeout reached, checking if transaction ${transactionHash} was included...`);
+        try {
+          // Try to find the transaction in recent blocks
+          const header = await api.rpc.chain.getHeader();
+          const currentBlock = header.number.toNumber();
+          
+          // Check last 20 blocks (more than minting since asset creation might take longer)
+          for (let i = 0; i < 20; i++) {
+            const blockNumber = currentBlock - i;
+            if (blockNumber < 0) break;
+            
+            try {
+              const blockHash = await api.rpc.chain.getBlockHash(blockNumber);
+              const block = await api.rpc.chain.getBlock(blockHash);
+              
+              const found = block.block.extrinsics.find(ext => {
+                if (ext.isSigned) {
+                  const hash = ext.hash.toString();
+                  return hash === transactionHash;
+                }
+                return false;
+              });
+              
+              if (found) {
+                clearTimeout(timeout);
+                console.log(`✓ Transaction ${transactionHash} was found in block ${blockNumber}`);
+                resolve();
+                return;
+              }
+            } catch (e) {
+              // Continue checking other blocks
+            }
+          }
+        } catch (e) {
+          console.log(`Could not verify transaction status: ${e.message}`);
+        }
+        
         // Transaction was submitted but not confirmed in time
         console.warn(`⚠️  Transaction ${transactionHash} was submitted but not confirmed within timeout. It may still be processing.`);
         // Check if asset was actually created despite timeout
@@ -455,7 +493,7 @@ async function createAssetIfMissing(desiredAssetId, metadata) {
       } else {
         reject(new Error('Asset creation transaction timeout after 120 seconds. The transaction may not have been submitted.'));
       }
-    }, 120000); // Increased to 120 seconds for asset creation
+    }, 120000); // 120 second timeout
 
     console.log(`Sending create transaction with asset ID: ${assetIdForTx}`);
 
@@ -466,10 +504,13 @@ async function createAssetIfMissing(desiredAssetId, metadata) {
     // Let API manage nonce automatically to avoid future/stuck transactions due to pending pool
     tx.signAndSend(signingWallet, { tip: 2000000000 }, ({ status, txHash, dispatchError, events }) => {
       // Capture txHash as soon as we get it
-      if (txHash && !transactionHash) {
-        transactionHash = txHash.toString();
-        transactionSubmitted = true;
-        console.log(`Transaction submitted with hash: ${transactionHash}`);
+      if (txHash) {
+        const hashStr = txHash.toString();
+        if (!transactionHash) {
+          transactionHash = hashStr;
+          transactionSubmitted = true;
+          console.log(`📝 Transaction hash: ${hashStr}`);
+        }
       }
 
       if (dispatchError) {
@@ -555,6 +596,21 @@ async function createAssetIfMissing(desiredAssetId, metadata) {
         }
         
         resolve();
+      } else if (status.isReady) {
+        console.log(`→ Transaction ${txHash?.toString() || 'pending'} ready (broadcasting...)`);
+      } else if (status.isBroadcast) {
+        console.log(`→ Transaction ${txHash?.toString() || 'pending'} broadcasted (waiting to be included in block...)`);
+      } else {
+        // Log other status types for debugging
+        const statusStr = status.toString ? status.toString() : JSON.stringify(status);
+        console.log(`→ Transaction ${txHash?.toString() || 'pending'} status: ${statusStr}`);
+        
+        // Check for error statuses
+        if (status.isInvalid || status.isDropped) {
+          clearTimeout(timeout);
+          console.error(`❌ Transaction ${txHash?.toString() || 'unknown'} was ${status.isInvalid ? 'invalid' : 'dropped'}`);
+          reject(new Error(`Transaction was ${status.isInvalid ? 'invalid' : 'dropped'}`));
+        }
       }
     }).catch((error) => {
       clearTimeout(timeout);

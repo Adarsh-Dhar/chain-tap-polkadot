@@ -117,4 +117,3 @@ function ApplyDiscount() {
   // 8. Don't render anything if no discount code is available
   return null;
 }
-

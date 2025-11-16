@@ -1,0 +1,501 @@
+<div id="connect-wallet-container-{{ block.id }}" class="connect-wallet-wrapper">
+  <button 
+    id="connect-wallet-btn-{{ block.id }}" 
+    class="connect-wallet-btn"
+    disabled
+  >
+    <svg class="wallet-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M21 12V7H5a2 2 0 0 1 0-4h14v4"></path>
+      <path d="M3 5v14a2 2 0 0 0 2 2h16v-5"></path>
+      <path d="M18 12a2 2 0 0 0 0 4h4v-4Z"></path>
+    </svg>
+    <span id="connect-wallet-text-{{ block.id }}">Connect Wallet</span>
+  </button>
+  
+  <div id="wallet-dropdown-{{ block.id }}" class="wallet-dropdown" style="display: none;">
+    <div class="wallet-dropdown-header">
+      <div class="wallet-account-info">
+        <div class="wallet-avatar" id="wallet-avatar-{{ block.id }}">AC</div>
+        <div>
+          <div class="wallet-account-name" id="wallet-account-name-{{ block.id }}">Account</div>
+          <div class="wallet-account-address" id="wallet-account-address-{{ block.id }}">0x...</div>
+        </div>
+      </div>
+    </div>
+    <div class="wallet-dropdown-separator"></div>
+    <button class="wallet-dropdown-item" id="copy-address-btn-{{ block.id }}">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+        <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+      </svg>
+      <span id="copy-address-text-{{ block.id }}">Copy address</span>
+    </button>
+    <div id="accounts-list-{{ block.id }}" class="wallet-accounts-list"></div>
+    <div class="wallet-dropdown-separator"></div>
+    <button class="wallet-dropdown-item wallet-dropdown-item-danger" id="disconnect-btn-{{ block.id }}">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
+        <polyline points="16 17 21 12 16 7"></polyline>
+        <line x1="21" y1="12" x2="9" y2="12"></line>
+      </svg>
+      <span>Disconnect</span>
+    </button>
+  </div>
+</div>
+
+<style>
+  .connect-wallet-wrapper {
+    position: relative;
+    display: inline-block;
+  }
+
+  .connect-wallet-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    padding: 0.5rem 1rem;
+    font-size: 0.875rem;
+    font-weight: 500;
+    color: white;
+    background-color: hsl(222.2 47.4% 11.2%);
+    border: 1px solid hsl(222.2 47.4% 11.2%);
+    border-radius: 0.375rem;
+    cursor: pointer;
+    transition: all 0.2s;
+    min-height: 2.5rem;
+  }
+
+  .connect-wallet-btn:hover:not(:disabled) {
+    background-color: hsl(222.2 47.4% 13.2%);
+  }
+
+  .connect-wallet-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  .connect-wallet-btn.connected {
+    background-color: transparent;
+    color: hsl(222.2 47.4% 11.2%);
+    border-color: hsl(214.3 31.8% 91.4%);
+  }
+
+  .connect-wallet-btn.connected:hover {
+    background-color: hsl(210 40% 96.1%);
+  }
+
+  .wallet-icon {
+    flex-shrink: 0;
+  }
+
+  .wallet-dropdown {
+    position: absolute;
+    top: calc(100% + 0.5rem);
+    right: 0;
+    width: 16rem;
+    background-color: white;
+    border: 1px solid hsl(214.3 31.8% 91.4%);
+    border-radius: 0.5rem;
+    box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+    z-index: 50;
+    padding: 0.5rem;
+  }
+
+  .wallet-dropdown-header {
+    padding: 0.75rem;
+  }
+
+  .wallet-account-info {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+  }
+
+  .wallet-avatar {
+    width: 2rem;
+    height: 2rem;
+    border-radius: 9999px;
+    background-color: hsl(222.2 47.4% 11.2% / 0.1);
+    color: hsl(222.2 47.4% 11.2%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.75rem;
+    font-weight: 600;
+    flex-shrink: 0;
+  }
+
+  .wallet-account-name {
+    font-size: 0.875rem;
+    font-weight: 500;
+    color: hsl(222.2 47.4% 11.2%);
+  }
+
+  .wallet-account-address {
+    font-size: 0.75rem;
+    color: hsl(215.4 16.3% 46.9%);
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+    word-break: break-all;
+  }
+
+  .wallet-dropdown-separator {
+    height: 1px;
+    background-color: hsl(214.3 31.8% 91.4%);
+    margin: 0.5rem 0;
+  }
+
+  .wallet-dropdown-item {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    width: 100%;
+    padding: 0.5rem 0.75rem;
+    font-size: 0.875rem;
+    color: hsl(222.2 47.4% 11.2%);
+    background: none;
+    border: none;
+    border-radius: 0.375rem;
+    cursor: pointer;
+    transition: background-color 0.2s;
+    text-align: left;
+  }
+
+  .wallet-dropdown-item:hover {
+    background-color: hsl(210 40% 96.1%);
+  }
+
+  .wallet-dropdown-item-danger {
+    color: hsl(0 84.2% 60.2%);
+  }
+
+  .wallet-dropdown-item-danger:hover {
+    background-color: hsl(0 84.2% 60.2% / 0.1);
+  }
+
+  .wallet-accounts-list {
+    max-height: 12rem;
+    overflow-y: auto;
+  }
+
+  .wallet-account-item {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.5rem 0.75rem;
+    border-radius: 0.375rem;
+    cursor: pointer;
+    transition: background-color 0.2s;
+  }
+
+  .wallet-account-item:hover {
+    background-color: hsl(210 40% 96.1%);
+  }
+
+  .wallet-account-item.active {
+    background-color: hsl(210 40% 96.1%);
+  }
+
+  .wallet-account-item-avatar {
+    width: 1rem;
+    height: 1rem;
+    border-radius: 9999px;
+    background-color: hsl(222.2 47.4% 11.2% / 0.1);
+    color: hsl(222.2 47.4% 11.2%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.625rem;
+    font-weight: 600;
+    flex-shrink: 0;
+  }
+
+  .wallet-account-item-info {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-width: 0;
+  }
+
+  .wallet-account-item-name {
+    font-size: 0.875rem;
+    color: hsl(222.2 47.4% 11.2%);
+  }
+
+  .wallet-account-item-address {
+    font-size: 0.75rem;
+    color: hsl(215.4 16.3% 46.9%);
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  }
+</style>
+
+<script>
+(function() {
+  const blockId = '{{ block.id }}';
+  const STORAGE_KEY = 'chainTap_wallet_address';
+  
+  let accounts = [];
+  let selectedAccount = null;
+  let isConnecting = false;
+  let dropdownOpen = false;
+
+  const container = document.getElementById(`connect-wallet-container-${blockId}`);
+  const connectBtn = document.getElementById(`connect-wallet-btn-${blockId}`);
+  const connectText = document.getElementById(`connect-wallet-text-${blockId}`);
+  const walletDropdown = document.getElementById(`wallet-dropdown-${blockId}`);
+  const walletAvatar = document.getElementById(`wallet-avatar-${blockId}`);
+  const walletAccountName = document.getElementById(`wallet-account-name-${blockId}`);
+  const walletAccountAddress = document.getElementById(`wallet-account-address-${blockId}`);
+  const copyAddressBtn = document.getElementById(`copy-address-btn-${blockId}`);
+  const copyAddressText = document.getElementById(`copy-address-text-${blockId}`);
+  const accountsList = document.getElementById(`accounts-list-${blockId}`);
+  const disconnectBtn = document.getElementById(`disconnect-btn-${blockId}`);
+
+  function truncateAddress(address, start = 6, end = 4) {
+    if (address.length <= start + end) return address;
+    return `${address.slice(0, start)}...${address.slice(-end)}`;
+  }
+
+  function updateUI() {
+    if (selectedAccount) {
+      connectBtn.classList.add('connected');
+      connectText.textContent = selectedAccount.meta.name || 'Account';
+      walletAvatar.textContent = (selectedAccount.meta.name || 'Account').slice(0, 2).toUpperCase();
+      walletAccountName.textContent = selectedAccount.meta.name || 'Account';
+      walletAccountAddress.textContent = selectedAccount.address;
+      connectBtn.disabled = false;
+    } else {
+      connectBtn.classList.remove('connected');
+      connectText.textContent = isConnecting ? 'Connecting...' : 'Connect Wallet';
+      connectBtn.disabled = isConnecting;
+    }
+  }
+
+  function renderAccountsList() {
+    if (accounts.length <= 1) {
+      accountsList.innerHTML = '';
+      return;
+    }
+
+    const accountsHTML = accounts.map(account => {
+      const isActive = selectedAccount && account.address === selectedAccount.address;
+      const accountName = account.meta.name || 'Account';
+      const truncatedAddr = truncateAddress(account.address, 4, 4);
+      
+      return `
+        <div class="wallet-account-item ${isActive ? 'active' : ''}" 
+             data-address="${account.address}">
+          <div class="wallet-account-item-avatar">${accountName.slice(0, 2).toUpperCase()}</div>
+          <div class="wallet-account-item-info">
+            <div class="wallet-account-item-name">${accountName}</div>
+            <div class="wallet-account-item-address">${truncatedAddr}</div>
+          </div>
+        </div>
+      `;
+    }).join('');
+
+    accountsList.innerHTML = `
+      <div style="padding: 0.5rem 0.75rem; font-size: 0.75rem; font-weight: 500; color: hsl(215.4 16.3% 46.9%);">
+        Switch account
+      </div>
+      ${accountsHTML}
+    `;
+
+    // Add click handlers for account items
+    accountsList.querySelectorAll('.wallet-account-item').forEach(item => {
+      item.addEventListener('click', () => {
+        const address = item.dataset.address;
+        const account = accounts.find(acc => acc.address === address);
+        if (account) {
+          selectAccount(account);
+        }
+      });
+    });
+  }
+
+  async function loadPolkadotExtension() {
+    // Check if already loaded
+    if (window.polkadotExtension) {
+      return window.polkadotExtension;
+    }
+
+    try {
+      // Use dynamic import for ES modules
+      const module = await import('https://cdn.jsdelivr.net/npm/@polkadot/extension-dapp@0.62.3/+esm');
+      window.polkadotExtension = module;
+      return module;
+    } catch (error) {
+      console.error('Failed to load Polkadot extension library:', error);
+      throw new Error('Failed to load Polkadot extension library. Please check your internet connection.');
+    }
+  }
+
+  async function connect() {
+    if (typeof window === 'undefined') {
+      throw new Error('Wallet connection is only available in the browser');
+    }
+
+    isConnecting = true;
+    updateUI();
+
+    try {
+      // Load Polkadot extension library
+      const polkadotExtension = await loadPolkadotExtension();
+      const { web3Enable, web3Accounts } = polkadotExtension;
+      
+      // Request wallet permissions
+      const extensions = await web3Enable('ChainTap');
+
+      if (extensions.length === 0) {
+        throw new Error('No wallet extension found. Please install a Polkadot-compatible wallet like SubWallet.');
+      }
+
+      // Get all accounts
+      const allAccounts = await web3Accounts();
+
+      if (allAccounts.length === 0) {
+        throw new Error('No accounts found. Please create an account in your wallet extension.');
+      }
+
+      accounts = allAccounts;
+
+      // Select the first account by default, or try to restore saved account
+      const savedAddress = localStorage.getItem(STORAGE_KEY);
+      const accountToSelect = savedAddress
+        ? allAccounts.find(acc => acc.address === savedAddress) || allAccounts[0]
+        : allAccounts[0];
+
+      selectedAccount = accountToSelect;
+      localStorage.setItem(STORAGE_KEY, accountToSelect.address);
+      
+      updateUI();
+      renderAccountsList();
+      
+      return accountToSelect;
+    } catch (error) {
+      console.error('Error connecting to wallet:', error);
+      alert(error?.message || 'Failed to connect to wallet');
+      throw error;
+    } finally {
+      isConnecting = false;
+      updateUI();
+    }
+  }
+
+  function disconnect() {
+    selectedAccount = null;
+    accounts = [];
+    localStorage.removeItem(STORAGE_KEY);
+    updateUI();
+    renderAccountsList();
+    walletDropdown.style.display = 'none';
+    dropdownOpen = false;
+  }
+
+  function selectAccount(account) {
+    selectedAccount = account;
+    localStorage.setItem(STORAGE_KEY, account.address);
+    updateUI();
+    renderAccountsList();
+    walletDropdown.style.display = 'none';
+    dropdownOpen = false;
+  }
+
+  async function copyAddress() {
+    if (!selectedAccount) return;
+
+    try {
+      await navigator.clipboard.writeText(selectedAccount.address);
+      copyAddressText.textContent = 'Copied!';
+      setTimeout(() => {
+        copyAddressText.textContent = 'Copy address';
+      }, 2000);
+    } catch (error) {
+      console.error('Failed to copy address:', error);
+      alert('Failed to copy address to clipboard');
+    }
+  }
+
+  async function reconnectToSavedAccount() {
+    if (typeof window === 'undefined') return;
+    
+    const savedAddress = localStorage.getItem(STORAGE_KEY);
+    if (!savedAddress) return;
+
+    try {
+      const polkadotExtension = await loadPolkadotExtension();
+      const { web3Enable, web3Accounts } = polkadotExtension;
+      const extensions = await web3Enable('ChainTap');
+      if (extensions.length === 0) return;
+
+      const allAccounts = await web3Accounts();
+      const savedAccount = allAccounts.find(acc => acc.address === savedAddress);
+
+      if (savedAccount) {
+        accounts = allAccounts;
+        selectedAccount = savedAccount;
+        updateUI();
+        renderAccountsList();
+      } else {
+        localStorage.removeItem(STORAGE_KEY);
+      }
+    } catch (error) {
+      console.error('Error reconnecting to wallet:', error);
+      localStorage.removeItem(STORAGE_KEY);
+    }
+  }
+
+  // Event listeners
+  connectBtn.addEventListener('click', async (e) => {
+    e.stopPropagation();
+    
+    if (selectedAccount) {
+      // Toggle dropdown
+      dropdownOpen = !dropdownOpen;
+      walletDropdown.style.display = dropdownOpen ? 'block' : 'none';
+    } else {
+      // Connect wallet
+      try {
+        await connect();
+      } catch (error) {
+        // Error already handled in connect()
+      }
+    }
+  });
+
+  copyAddressBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    copyAddress();
+  });
+
+  disconnectBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    disconnect();
+  });
+
+  // Close dropdown when clicking outside
+  document.addEventListener('click', (e) => {
+    if (!container.contains(e.target)) {
+      walletDropdown.style.display = 'none';
+      dropdownOpen = false;
+    }
+  });
+
+  // Initialize: try to reconnect to saved account
+  if (typeof window !== 'undefined') {
+    reconnectToSavedAccount();
+  }
+
+  // Initial UI update
+  updateUI();
+})();
+</script>
+
+{% schema %}
+{
+  "name": "Connect Wallet",
+  "target": "section",
+  "settings": []
+}
+{% endschema %}
+
