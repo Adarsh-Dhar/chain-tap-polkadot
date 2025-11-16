@@ -60,6 +60,67 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []) // reconnectToSavedAccount is stable (empty deps), safe to omit
 
+  // Helper function to send wallet address to backend
+  const sendWalletToBackend = useCallback(async (walletAddress: string, cartId?: string, customerId?: string, shop?: string) => {
+    try {
+      // Use the Next.js app URL (same origin as the main app)
+      const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 
+        (typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000')
+      
+      // If shop not provided, try to get it from URL or session
+      let shopDomain = shop;
+      if (!shopDomain && typeof window !== 'undefined') {
+        const urlParams = new URLSearchParams(window.location.search);
+        shopDomain = urlParams.get('shop') || undefined;
+        
+        // If still no shop, try to get from session API
+        if (!shopDomain) {
+          try {
+            const sessionResponse = await fetch(`${backendUrl}/api/shop/session`);
+            if (sessionResponse.ok) {
+              const sessionData = await sessionResponse.json();
+              if (sessionData.shop) {
+                shopDomain = sessionData.shop;
+              } else if (sessionData.sessions && sessionData.sessions.length > 0) {
+                const validSession = sessionData.sessions.find(
+                  (s: { isExpired: boolean }) => !s.isExpired
+                ) || sessionData.sessions[0];
+                shopDomain = validSession?.shop;
+              }
+            }
+          } catch (e) {
+            console.warn('Could not fetch shop from session:', e);
+          }
+        }
+      }
+      
+      const response = await fetch(`${backendUrl}/api/store-wallet`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        credentials: 'include', // Include cookies for session
+        body: JSON.stringify({
+          walletAddress,
+          ...(cartId && { cartId }),
+          ...(customerId && { customerId }),
+          ...(shopDomain && { shop: shopDomain }),
+        }),
+      })
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ error: 'Failed to store wallet' }))
+        console.warn('Failed to store wallet in backend:', errorData)
+        // Don't throw - this is not critical for wallet connection
+      } else {
+        console.log('Wallet address stored in backend successfully')
+      }
+    } catch (error) {
+      console.warn('Error sending wallet to backend:', error)
+      // Don't throw - this is not critical for wallet connection
+    }
+  }, [])
+
   const connect = useCallback(async (): Promise<InjectedAccountWithMeta> => {
     if (typeof window === 'undefined') {
       throw new Error('Wallet connection is only available in the browser')
@@ -94,6 +155,18 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
 
       setSelectedAccount(accountToSelect)
       localStorage.setItem(STORAGE_KEY, accountToSelect.address)
+      
+      // Send wallet address to backend (non-blocking)
+      // Try to get cart/customer ID and shop from URL params or localStorage if available
+      const urlParams = new URLSearchParams(window.location.search)
+      const cartId = urlParams.get('cart') || localStorage.getItem('cartId') || undefined
+      const customerId = urlParams.get('customer') || localStorage.getItem('customerId') || undefined
+      const shop = urlParams.get('shop') || undefined
+      
+      sendWalletToBackend(accountToSelect.address, cartId, customerId, shop).catch(err => {
+        console.warn('Background wallet sync failed:', err)
+      })
+      
       return accountToSelect
     } catch (error) {
       console.error('Error connecting to wallet:', error)
@@ -101,7 +174,7 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
     } finally {
       setIsConnecting(false)
     }
-  }, [])
+  }, [sendWalletToBackend])
 
   const disconnect = useCallback(() => {
     setSelectedAccount(null)
@@ -112,7 +185,17 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
   const selectAccount = useCallback((account: InjectedAccountWithMeta) => {
     setSelectedAccount(account)
     localStorage.setItem(STORAGE_KEY, account.address)
-  }, [])
+    
+    // Send updated wallet address to backend when account is switched
+    const urlParams = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null
+    const cartId = urlParams?.get('cart') || (typeof window !== 'undefined' ? localStorage.getItem('cartId') : null) || undefined
+    const customerId = urlParams?.get('customer') || (typeof window !== 'undefined' ? localStorage.getItem('customerId') : null) || undefined
+    const shop = urlParams?.get('shop') || undefined
+    
+    sendWalletToBackend(account.address, cartId, customerId, shop).catch(err => {
+      console.warn('Background wallet sync failed:', err)
+    })
+  }, [sendWalletToBackend])
 
   const value: WalletContextType = {
     accounts,

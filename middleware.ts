@@ -38,6 +38,33 @@ export async function middleware(request: NextRequest) {
     return response
   }
 
+  // Handle CORS for get-wallet API (called from checkout extension)
+  if (pathname.startsWith("/api/get-wallet")) {
+    // Handle preflight OPTIONS request
+    if (request.method === "OPTIONS") {
+      return new NextResponse(null, {
+        status: 200,
+        headers: {
+          "Access-Control-Allow-Origin": "*",
+          "Access-Control-Allow-Methods": "GET, OPTIONS",
+          "Access-Control-Allow-Headers": "Content-Type, Authorization, ngrok-skip-browser-warning",
+          "Access-Control-Max-Age": "86400", // 24 hours
+        },
+      })
+    }
+    // For other methods, ensure CORS headers are set
+    const response = NextResponse.next({
+      request: {
+        headers: new Headers(request.headers),
+      },
+    })
+    response.headers.set("Access-Control-Allow-Origin", "*")
+    response.headers.set("Access-Control-Allow-Methods", "GET, OPTIONS")
+    response.headers.set("Access-Control-Allow-Headers", "Content-Type, Authorization, ngrok-skip-browser-warning")
+    response.headers.set("Vary", "Origin")
+    return response
+  }
+
   // Skip middleware for:
   // - Auth routes (they handle their own logic)
   // - API routes (they handle auth themselves)

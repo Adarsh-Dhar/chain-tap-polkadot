@@ -119,3 +119,15 @@ model ShopifySession {
   @@map("shopify_sessions")
 }
 
+model WalletAddress {
+  id            String    @id @default(cuid())
+  cartId        String?   @unique
+  customerId    String?
+  walletAddress String
+  shop          String
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@map("wallet_addresses")
+}
+

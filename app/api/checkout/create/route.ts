@@ -1,4 +1,5 @@
 import { sanitizeShop } from "@/lib/shopify-oauth"
+import { prisma } from "@/lib/prisma"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
@@ -252,6 +253,33 @@ export async function POST(req: Request) {
         { error: "Failed to create cart: Missing cart ID or checkout URL" },
         { status: 500 }
       )
+    }
+
+    // Store wallet address with cartId if provided
+    // Extract numeric cartId (format: gid://shopify/Cart/xxx -> xxx)
+    if (walletAddress && typeof walletAddress === "string") {
+      try {
+        const numericCartId = cartId.includes('/') ? cartId.split('/').pop() : cartId;
+        
+        await prisma.walletAddress.upsert({
+          where: { cartId: numericCartId },
+          update: {
+            walletAddress,
+            shop: cleanShop,
+            updatedAt: new Date(),
+          },
+          create: {
+            walletAddress,
+            cartId: numericCartId,
+            shop: cleanShop,
+          },
+        });
+        
+        console.log("✅ Wallet address stored with cartId:", numericCartId);
+      } catch (walletError) {
+        console.error("⚠️ Failed to store wallet address:", walletError);
+        // Don't block checkout if wallet storage fails
+      }
     }
 
     // Apply discount code directly to cart if we have one
