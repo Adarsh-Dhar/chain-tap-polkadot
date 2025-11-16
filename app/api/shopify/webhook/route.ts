@@ -203,16 +203,46 @@ function extractWalletAddress(payload: any): string | null {
  */
 async function handleOrderPaid(payload: any, shop?: string | null) {
   const orderId = String(payload.id)
-  console.log(`💰 [WEBHOOK] Order ${orderId} paid. Processing minting...`)
+  const orderNumber = payload.order_number || payload.name || "unknown"
+  console.log(`💰 [WEBHOOK] Order ${orderId} (${orderNumber}) paid. Processing minting...`)
 
   // Extract wallet address
   const walletAddress = extractWalletAddress(payload)
   if (!walletAddress) {
-    console.log("⚠️ [WEBHOOK] No wallet address found on order. Skipping mint.")
+    const errorMsg = `⚠️ [WEBHOOK] No wallet address found on order ${orderId} (${orderNumber}). Skipping mint.`
+    console.log(errorMsg)
+    
+    // Create a failed record in database for tracking
+    try {
+      const contractId = await getContractByShop(shop || null)
+      await prisma.orderReward.upsert({
+        where: {
+          contractId_orderId: {
+            contractId,
+            orderId,
+          },
+        },
+        create: {
+          contractId,
+          orderId,
+          wallet: null,
+          amount: "0",
+          status: "failed",
+          error: "No wallet address found in order attributes",
+        },
+        update: {
+          status: "failed",
+          error: "No wallet address found in order attributes",
+        },
+      })
+      console.log(`📝 [WEBHOOK] Created failed record for order ${orderId} due to missing wallet address`)
+    } catch (dbError) {
+      console.error(`❌ [WEBHOOK] Failed to create database record:`, dbError)
+    }
     return
   }
 
-  console.log(`🔗 [WEBHOOK] Wallet address: ${walletAddress}`)
+  console.log(`🔗 [WEBHOOK] Wallet address extracted: ${walletAddress}`)
 
   // Get contract ID
   const contractId = await getContractByShop(shop || null)
@@ -381,14 +411,18 @@ async function handleOrderPaid(payload: any, shop?: string | null) {
   })
 
   // Mint tokens for each asset group
+  console.log(`🪙 [WEBHOOK] Starting mint process for ${assetGroups.size} asset group(s)`)
   for (const [assetId, quantity] of assetGroups.entries()) {
     try {
       console.log(
-        `🔨 [WEBHOOK] Minting ${quantity} tokens for Asset ${assetId} to ${walletAddress}`
+        `🔨 [WEBHOOK] Minting ${quantity} token(s) (1 token per item) for Asset ${assetId} to wallet ${walletAddress}`
       )
 
-      // Calculate amount: 1 token per 1 item
+      // Calculate amount: 1 token per 1 item (quantity-based minting)
       const tokenAmountBN = calculateTokenAmount(quantity, 1)
+      console.log(
+        `📊 [WEBHOOK] Calculated token amount: ${quantity} tokens = ${tokenAmountBN.toString()} smallest units for Asset ${assetId}`
+      )
 
       // Execute minting
       const txHash = await mintAndTransferTokens(
@@ -397,7 +431,9 @@ async function handleOrderPaid(payload: any, shop?: string | null) {
         assetId
       )
 
-      console.log(`✅ [WEBHOOK] Mint Success! Tx: ${txHash}`)
+      console.log(
+        `✅ [WEBHOOK] Mint Success! Asset ${assetId}: ${quantity} tokens minted to ${walletAddress}. TX: ${txHash}`
+      )
 
       mintResults.push({
         assetId,
@@ -407,7 +443,11 @@ async function handleOrderPaid(payload: any, shop?: string | null) {
     } catch (error) {
       const errorMessage =
         error instanceof Error ? error.message : "Unknown error"
-      console.error(`❌ [WEBHOOK] Minting Failed for asset ${assetId}:`, errorMessage)
+      console.error(
+        `❌ [WEBHOOK] Minting Failed for Asset ${assetId} (${quantity} tokens to ${walletAddress}):`,
+        errorMessage
+      )
+      console.error(`❌ [WEBHOOK] Full error details:`, error)
 
       hasErrors = true
       mintResults.push({
@@ -458,16 +498,37 @@ async function handleOrderPaid(payload: any, shop?: string | null) {
   // Log final summary
   const successCount = mintResults.filter((r) => r.txHash).length
   const failCount = mintResults.filter((r) => r.error).length
+  const totalTokensMinted = mintResults
+    .filter((r) => r.txHash)
+    .reduce((sum, r) => sum + r.quantity, 0)
+  
   console.log(
-    `✅ [WEBHOOK] Order ${orderId} processing complete. ` +
+    `✅ [WEBHOOK] Order ${orderId} (${orderNumber}) processing complete. ` +
       `Success: ${successCount}/${mintResults.length}, Failed: ${failCount}/${mintResults.length}`
+  )
+  console.log(
+    `📊 [WEBHOOK] Total tokens minted: ${totalTokensMinted} tokens to wallet ${walletAddress}`
   )
   
   if (successCount > 0) {
-    console.log(`🎉 [WEBHOOK] Successfully minted tokens for ${successCount} asset(s)`)
+    console.log(
+      `🎉 [WEBHOOK] Successfully minted ${totalTokensMinted} tokens across ${successCount} asset(s) to ${walletAddress}`
+    )
+    // Log successful transaction hashes
+    const txHashes = mintResults
+      .filter((r) => r.txHash)
+      .map((r) => `Asset ${r.assetId}: ${r.txHash}`)
+      .join(", ")
+    console.log(`🔗 [WEBHOOK] Transaction hashes: ${txHashes}`)
   }
   if (failCount > 0) {
     console.error(`❌ [WEBHOOK] Failed to mint tokens for ${failCount} asset(s)`)
+    // Log failed asset details
+    const failedAssets = mintResults
+      .filter((r) => r.error)
+      .map((r) => `Asset ${r.assetId} (${r.quantity} tokens): ${r.error}`)
+      .join("; ")
+    console.error(`❌ [WEBHOOK] Failed assets: ${failedAssets}`)
   }
 }
 
@@ -522,13 +583,54 @@ export async function POST(req: Request) {
           shop = null // Invalid shop format, use default contract
         }
       }
+      console.log(`🏪 [WEBHOOK] Processing order for shop: ${shop || "default"}`)
       await handleOrderPaid(body as any, shop)
+      console.log(`✅ [WEBHOOK] Order processing completed successfully`)
     } catch (error) {
+      const orderId = (body as any)?.id || "unknown"
+      const orderNumber = (body as any)?.order_number || (body as any)?.name || "unknown"
       console.error("❌ [WEBHOOK] Error handling order paid:", {
         error: error instanceof Error ? error.message : String(error),
-        orderId: (body as any)?.id,
+        orderId,
+        orderNumber,
+        stack: error instanceof Error ? error.stack : undefined,
       })
-      // Return 200 OK to prevent Shopify retries
+      
+      // Try to create a failed record in database
+      try {
+        let shop = req.headers.get("x-shopify-shop-domain") || null
+        if (shop) {
+          shop = shop.replace(/^https?:\/\//, "").replace(/\/$/, "")
+          if (!sanitizeShop(shop)) {
+            shop = null
+          }
+        }
+        const contractId = await getContractByShop(shop || null)
+        await prisma.orderReward.upsert({
+          where: {
+            contractId_orderId: {
+              contractId,
+              orderId: String(orderId),
+            },
+          },
+          create: {
+            contractId,
+            orderId: String(orderId),
+            wallet: null,
+            amount: "0",
+            status: "failed",
+            error: error instanceof Error ? error.message : String(error),
+          },
+          update: {
+            status: "failed",
+            error: error instanceof Error ? error.message : String(error),
+          },
+        })
+      } catch (dbError) {
+        console.error("❌ [WEBHOOK] Failed to create database record for error:", dbError)
+      }
+      
+      // Return 200 OK to prevent Shopify retries (we've logged the error)
     }
     return new Response("ok")
   }
