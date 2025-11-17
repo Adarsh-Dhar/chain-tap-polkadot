@@ -2,11 +2,6 @@ import { verifyShopifyHmac } from "@/lib/shopify"
 import { prisma } from "@/lib/prisma"
 import { sanitizeShop } from "@/lib/shopify-oauth"
 
-// Import blockchain utilities (CommonJS module)
-// eslint-disable-next-line @typescript-eslint/no-var-requires
-const blockchainUtils = require("../../../../my-phala-forwarder/utils/blockchain")
-const { calculateTokenAmount, mintAndTransferTokens } = blockchainUtils
-
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
 
@@ -35,12 +30,33 @@ async function getContractByShop(shop: string | null): Promise<number> {
 }
 
 /**
- * Extract wallet address from order attributes
- * Checks all possible locations where Shopify might store cart attributes
+ * Extract wallet address from order metafields and attributes
+ * Prioritizes metafields (hodlers_hedge.wallet_address), then falls back to attributes
  */
 function extractWalletAddress(payload: any): string | null {
   // Debug: Log what we're looking for
   console.log("🔍 [WEBHOOK] Searching for wallet address in order payload...")
+
+  // 1. PRIORITY: Check metafields first (hodlers_hedge.wallet_address)
+  const metafields = payload.metafields || []
+  console.log(`📦 [WEBHOOK] metafields count: ${metafields.length}`)
+  if (metafields.length > 0) {
+    console.log(
+      `📦 [WEBHOOK] metafields:`,
+      JSON.stringify(metafields, null, 2)
+    )
+  }
+
+  const walletMetafield = metafields.find(
+    (m: any) =>
+      m.namespace === "hodlers_hedge" && m.key === "wallet_address"
+  )
+  if (walletMetafield?.value) {
+    console.log(
+      `✅ [WEBHOOK] Found wallet in metafields (hodlers_hedge.wallet_address): ${walletMetafield.value}`
+    )
+    return walletMetafield.value as string
+  }
 
   // Helper function for case-insensitive attribute matching
   const matchesWalletAttribute = (name: string): boolean => {
@@ -54,7 +70,7 @@ function extractWalletAddress(payload: any): string | null {
     )
   }
 
-  // 1. Check note_attributes first (Shopify converts cart attributes to note attributes)
+  // 2. Fallback: Check note_attributes (Shopify converts cart attributes to note attributes)
   const noteAttributes = payload.note_attributes || []
   console.log(`📝 [WEBHOOK] note_attributes count: ${noteAttributes.length}`)
   if (noteAttributes.length > 0) {
@@ -74,7 +90,7 @@ function extractWalletAddress(payload: any): string | null {
     return walletFromNote.value
   }
 
-  // 2. Check attributes array
+  // 3. Fallback: Check attributes array
   const attributes = payload.attributes || []
   console.log(`📋 [WEBHOOK] attributes count: ${attributes.length}`)
   if (attributes.length > 0) {
@@ -94,7 +110,7 @@ function extractWalletAddress(payload: any): string | null {
     return walletFromAttr.value
   }
 
-  // 3. Check note field (Shopify sometimes puts cart attributes in the note)
+  // 4. Fallback: Check note field (Shopify sometimes puts cart attributes in the note)
   const note = payload.note || ""
   console.log(`📄 [WEBHOOK] note field: ${note ? `"${note.substring(0, 100)}..."` : "empty"}`)
   if (note) {
@@ -110,7 +126,7 @@ function extractWalletAddress(payload: any): string | null {
     }
   }
 
-  // 4. Check customer.note field
+  // 5. Fallback: Check customer.note field
   const customerNote = payload.customer?.note || ""
   console.log(
     `👤 [WEBHOOK] customer.note: ${customerNote ? `"${customerNote.substring(0, 100)}..."` : "empty"}`
@@ -127,7 +143,7 @@ function extractWalletAddress(payload: any): string | null {
     }
   }
 
-  // 5. Check line item properties (cart attributes can appear here)
+  // 6. Fallback: Check line item properties (cart attributes can appear here)
   const lineItems = payload.line_items || []
   console.log(`📦 [WEBHOOK] Checking ${lineItems.length} line items for properties...`)
   
@@ -150,7 +166,7 @@ function extractWalletAddress(payload: any): string | null {
     }
   }
 
-  // 6. Check custom attributes (alternative format)
+  // 7. Fallback: Check custom attributes (alternative format)
   const customAttributes = payload.custom_attributes || []
   console.log(`🏷️ [WEBHOOK] custom_attributes count: ${customAttributes.length}`)
   if (customAttributes.length > 0) {
@@ -170,7 +186,7 @@ function extractWalletAddress(payload: any): string | null {
     return walletFromCustom.value
   }
 
-  // 7. Last resort: Check all string fields for wallet-like patterns
+  // 8. Last resort: Check all string fields for wallet-like patterns
   console.log("🔍 [WEBHOOK] Performing deep search for wallet address pattern...")
   const walletPattern = /[A-Za-z0-9]{47,48}/
   
@@ -194,19 +210,19 @@ function extractWalletAddress(payload: any): string | null {
     }
   }
 
-  console.log("⚠️ [WEBHOOK] No wallet address found in any location")
+  console.log("⚠️ [WEBHOOK] No wallet address found in metafields or any fallback location")
   return null
 }
 
 /**
- * Handle ORDERS_PAID webhook event - mint tokens automatically
+ * Handle ORDERS_PAID webhook event - track order and let forwarder handle minting
  */
 async function handleOrderPaid(payload: any, shop?: string | null) {
   const orderId = String(payload.id)
   const orderNumber = payload.order_number || payload.name || "unknown"
   console.log(`💰 [WEBHOOK] Order ${orderId} (${orderNumber}) paid. Processing minting...`)
 
-  // Extract wallet address
+  // Extract wallet address from metafields (prioritized) or fallback to attributes
   const walletAddress = extractWalletAddress(payload)
   if (!walletAddress) {
     const errorMsg = `⚠️ [WEBHOOK] No wallet address found on order ${orderId} (${orderNumber}). Skipping mint.`
@@ -228,11 +244,11 @@ async function handleOrderPaid(payload: any, shop?: string | null) {
           wallet: null,
           amount: "0",
           status: "failed",
-          error: "No wallet address found in order attributes",
+          error: "No wallet address found in order metafields or attributes",
         },
         update: {
           status: "failed",
-          error: "No wallet address found in order attributes",
+          error: "No wallet address found in order metafields or attributes",
         },
       })
       console.log(`📝 [WEBHOOK] Created failed record for order ${orderId} due to missing wallet address`)
@@ -244,150 +260,26 @@ async function handleOrderPaid(payload: any, shop?: string | null) {
 
   console.log(`🔗 [WEBHOOK] Wallet address extracted: ${walletAddress}`)
 
-  // Get contract ID
+  // Get contract ID and configuration
   const contractId = await getContractByShop(shop || null)
-
-  // Process line items
-  const lineItems = payload.line_items || []
-  if (lineItems.length === 0) {
-    console.log("⚠️ [WEBHOOK] No line items found. Skipping mint.")
-    return
-  }
-
-  // Extract product IDs from line items
-  const productIds = lineItems
-    .map((item: any) => {
-      // Try product_id first (most common)
-      if (item.product_id) {
-        return item.product_id.toString()
-      }
-      // Log warning if product_id is missing for debugging
-      console.warn(`⚠️ [WEBHOOK] Line item missing product_id:`, {
-        title: item.title,
-        variant_id: item.variant_id,
-        sku: item.sku,
-      })
-      return null
-    })
-    .filter((id: string | null | undefined): id is string => !!id)
-
-  if (productIds.length === 0) {
-    console.log("⚠️ [WEBHOOK] No product IDs found in line items. Skipping mint.")
-    // Log line items structure for debugging
-    console.log("📦 [WEBHOOK] Line items sample:", JSON.stringify(lineItems.slice(0, 2), null, 2))
-    return
-  }
-
-  console.log(`📋 [WEBHOOK] Found ${productIds.length} product IDs:`, productIds)
-
-  // Look up assetIds from ProductToken table
-  const fullProductIds = productIds.map((id: string) => `gid://shopify/Product/${id}`)
-  console.log(`🔍 [WEBHOOK] Looking up ${fullProductIds.length} products in database...`)
   
-  const productTokens = await prisma.productToken.findMany({
-    where: {
-      productId: {
-        in: fullProductIds,
-      },
-    },
-  })
-
-  console.log(`🔍 [WEBHOOK] Found ${productTokens.length} product tokens in database`)
-
-  // Create a map of productId -> assetId
-  const productAssetMap = new Map<string, number>()
-  productTokens.forEach((token) => {
-    if (token.assetId) {
-      productAssetMap.set(token.productId, token.assetId)
-      console.log(`✅ [WEBHOOK] Mapped ${token.productId} -> Asset ${token.assetId}`)
-    } else {
-      console.warn(`⚠️ [WEBHOOK] Product ${token.productId} has no assetId`)
-    }
-  })
-
-  // Log products that weren't found in database
-  const foundProductIds = new Set(productTokens.map((t) => t.productId))
-  const missingProducts = fullProductIds.filter((id: string) => !foundProductIds.has(id))
-  if (missingProducts.length > 0) {
-    console.warn(`⚠️ [WEBHOOK] ${missingProducts.length} products not found in ProductToken table:`, missingProducts)
-  }
-
-  // Group line items by assetId and sum quantities
-  const assetGroups = new Map<number, number>() // assetId -> total quantity
-  const itemsWithoutAssetId: string[] = []
-
-  for (const item of lineItems) {
-    const productId = item.product_id?.toString()
-    if (!productId) {
-      itemsWithoutAssetId.push(`"${item.title || 'Unknown'}" (no product_id)`)
-      continue
-    }
-
-    const fullProductId = `gid://shopify/Product/${productId}`
-    const assetId = productAssetMap.get(fullProductId)
-    if (!assetId) {
-      itemsWithoutAssetId.push(`"${item.title || 'Unknown'}" (product ${productId} has no assetId)`)
-      console.log(
-        `⚠️ [WEBHOOK] No assetId found for product ${productId} (${item.title || 'Unknown'}). Skipping.`
-      )
-      continue
-    }
-
-    const quantity = item.quantity || 0
-    const currentQuantity = assetGroups.get(assetId) || 0
-    assetGroups.set(assetId, currentQuantity + quantity)
-    console.log(
-      `📦 [WEBHOOK] Added ${quantity} items of product ${productId} -> Asset ${assetId} (total: ${currentQuantity + quantity})`
-    )
-  }
-
-  if (itemsWithoutAssetId.length > 0) {
-    console.warn(`⚠️ [WEBHOOK] ${itemsWithoutAssetId.length} items skipped:`, itemsWithoutAssetId)
-  }
-
-  if (assetGroups.size === 0) {
-    console.log(
-      "⚠️ [WEBHOOK] No items with assetId found. Skipping mint."
-    )
-    // Create a failed record
-    await prisma.orderReward.upsert({
-      where: {
-        contractId_orderId: {
-          contractId,
-          orderId,
-        },
-      },
-      create: {
-        contractId,
-        orderId,
-        wallet: walletAddress,
-        amount: "0",
-        status: "failed",
-        error: "No products with assetId found",
-      },
-      update: {
-        status: "failed",
-        error: "No products with assetId found",
-      },
+  // Get contract to retrieve tokensPerOrder configuration
+  let contract
+  try {
+    contract = await prisma.contract.findUnique({
+      where: { id: contractId },
+      select: { tokensPerOrder: true },
     })
-    return
+  } catch (dbError) {
+    console.error(`❌ [WEBHOOK] Failed to fetch contract:`, dbError)
   }
 
-  // Mint tokens for each asset group
-  const mintResults: Array<{
-    assetId: number
-    quantity: number
-    txHash?: string
-    error?: string
-  }> = []
-
-  let hasErrors = false
+  // Get tokens per order from contract config, or default to 100
+  const tokensPerOrder = contract?.tokensPerOrder || 100
+  
+  console.log(`🪙 [WEBHOOK] Order will mint ${tokensPerOrder} tokens for ${walletAddress}`)
 
   // Create pending record first
-  const totalQuantity = Array.from(assetGroups.values()).reduce(
-    (sum, qty) => sum + qty,
-    0
-  )
   await prisma.orderReward.upsert({
     where: {
       contractId_orderId: {
@@ -399,137 +291,23 @@ async function handleOrderPaid(payload: any, shop?: string | null) {
       contractId,
       orderId,
       wallet: walletAddress,
-      amount: totalQuantity.toString(),
+      amount: tokensPerOrder.toString(),
       status: "pending",
     },
     update: {
       status: "pending",
       wallet: walletAddress,
-      amount: totalQuantity.toString(),
+      amount: tokensPerOrder.toString(),
       error: null,
     },
   })
 
-  // Mint tokens for each asset group
-  console.log(`🪙 [WEBHOOK] Starting mint process for ${assetGroups.size} asset group(s)`)
-  for (const [assetId, quantity] of assetGroups.entries()) {
-    try {
-      console.log(
-        `🔨 [WEBHOOK] Minting ${quantity} token(s) (1 token per item) for Asset ${assetId} to wallet ${walletAddress}`
-      )
-
-      // Calculate amount: 1 token per 1 item (quantity-based minting)
-      const tokenAmountBN = calculateTokenAmount(quantity, 1)
-      console.log(
-        `📊 [WEBHOOK] Calculated token amount: ${quantity} tokens = ${tokenAmountBN.toString()} smallest units for Asset ${assetId}`
-      )
-
-      // Execute minting
-      const txHash = await mintAndTransferTokens(
-        walletAddress,
-        tokenAmountBN,
-        assetId
-      )
-
-      console.log(
-        `✅ [WEBHOOK] Mint Success! Asset ${assetId}: ${quantity} tokens minted to ${walletAddress}. TX: ${txHash}`
-      )
-
-      mintResults.push({
-        assetId,
-        quantity,
-        txHash,
-      })
-    } catch (error) {
-      const errorMessage =
-        error instanceof Error ? error.message : "Unknown error"
-      console.error(
-        `❌ [WEBHOOK] Minting Failed for Asset ${assetId} (${quantity} tokens to ${walletAddress}):`,
-        errorMessage
-      )
-      console.error(`❌ [WEBHOOK] Full error details:`, error)
-
-      hasErrors = true
-      mintResults.push({
-        assetId,
-        quantity,
-        error: errorMessage,
-      })
-    }
-  }
-
-  // Update database record with final status
-  if (hasErrors) {
-    const errors = mintResults
-      .filter((r) => r.error)
-      .map((r) => `Asset ${r.assetId}: ${r.error}`)
-      .join("; ")
-
-    await prisma.orderReward.update({
-      where: {
-        contractId_orderId: {
-          contractId,
-          orderId,
-        },
-      },
-      data: {
-        status: "failed",
-        error: errors,
-      },
-    })
-  } else {
-    // All successful - use first txHash as reference
-    const firstTxHash = mintResults.find((r) => r.txHash)?.txHash
-
-    await prisma.orderReward.update({
-      where: {
-        contractId_orderId: {
-          contractId,
-          orderId,
-        },
-      },
-      data: {
-        status: "success",
-        txHash: firstTxHash || null,
-      },
-    })
-  }
-
-  // Log final summary
-  const successCount = mintResults.filter((r) => r.txHash).length
-  const failCount = mintResults.filter((r) => r.error).length
-  const totalTokensMinted = mintResults
-    .filter((r) => r.txHash)
-    .reduce((sum, r) => sum + r.quantity, 0)
-  
+  // Minting will be handled by the forwarder service
+  // The forwarder endpoint (lines 563-614) will process the order and mint tokens
   console.log(
-    `✅ [WEBHOOK] Order ${orderId} (${orderNumber}) processing complete. ` +
-      `Success: ${successCount}/${mintResults.length}, Failed: ${failCount}/${mintResults.length}`
+    `ℹ️ [WEBHOOK] Order ${orderId} (${orderNumber}) marked as pending. ` +
+    `Minting will be handled by forwarder service for wallet ${walletAddress}`
   )
-  console.log(
-    `📊 [WEBHOOK] Total tokens minted: ${totalTokensMinted} tokens to wallet ${walletAddress}`
-  )
-  
-  if (successCount > 0) {
-    console.log(
-      `🎉 [WEBHOOK] Successfully minted ${totalTokensMinted} tokens across ${successCount} asset(s) to ${walletAddress}`
-    )
-    // Log successful transaction hashes
-    const txHashes = mintResults
-      .filter((r) => r.txHash)
-      .map((r) => `Asset ${r.assetId}: ${r.txHash}`)
-      .join(", ")
-    console.log(`🔗 [WEBHOOK] Transaction hashes: ${txHashes}`)
-  }
-  if (failCount > 0) {
-    console.error(`❌ [WEBHOOK] Failed to mint tokens for ${failCount} asset(s)`)
-    // Log failed asset details
-    const failedAssets = mintResults
-      .filter((r) => r.error)
-      .map((r) => `Asset ${r.assetId} (${r.quantity} tokens): ${r.error}`)
-      .join("; ")
-    console.error(`❌ [WEBHOOK] Failed assets: ${failedAssets}`)
-  }
 }
 
 export async function POST(req: Request) {
@@ -635,7 +413,40 @@ export async function POST(req: Request) {
     return new Response("ok")
   }
 
-  // Handle orders/create event - forward to Phat endpoint (existing logic)
+  // Handle orders/create event
+  // Check if order is paid and process minting, then forward to Phat endpoint
+  const orderPayload = body as any
+  const financialStatus = orderPayload.financial_status || ""
+  const isPaid = financialStatus === "paid" || normalizedTopic === "orders/paid"
+  
+  // If order is paid, also process minting (for development using orders/create)
+  if (isPaid && normalizedTopic === "orders/create") {
+    try {
+      // Extract shop domain from headers
+      let shop = req.headers.get("x-shopify-shop-domain") || null
+      if (shop) {
+        shop = shop.replace(/^https?:\/\//, "").replace(/\/$/, "")
+        if (!sanitizeShop(shop)) {
+          shop = null // Invalid shop format, use default contract
+        }
+      }
+      console.log(`🏪 [WEBHOOK] Processing paid order (from orders/create) for shop: ${shop || "default"}`)
+      await handleOrderPaid(orderPayload, shop)
+      console.log(`✅ [WEBHOOK] Order minting processing completed successfully`)
+    } catch (error) {
+      const orderId = orderPayload?.id || "unknown"
+      const orderNumber = orderPayload?.order_number || orderPayload?.name || "unknown"
+      console.error("❌ [WEBHOOK] Error handling paid order from orders/create:", {
+        error: error instanceof Error ? error.message : String(error),
+        orderId,
+        orderNumber,
+        stack: error instanceof Error ? error.stack : undefined,
+      })
+      // Continue to forward logic even if minting fails
+    }
+  }
+
+  // Forward to Phat endpoint (existing logic)
   const phatUrl = process.env.PHAT_ENDPOINT_URL
   const forwardToken = process.env.PHAT_FORWARD_TOKEN || ""
 
