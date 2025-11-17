@@ -31,6 +31,7 @@ function getAppUrlFromToml(): string {
 }
 
 const SHOPIFY_CLIENT_SECRET = process.env.SHOPIFY_CLIENT_SECRET || ""
+console.error("🔍 SHOPIFY_CLIENT_SECRET check:", SHOPIFY_CLIENT_SECRET ? `SET (length: ${SHOPIFY_CLIENT_SECRET.length})` : "NOT SET - THIS IS THE PROBLEM!")
 const APP_URL = process.env.APP_URL || process.env.NEXT_PUBLIC_APP_URL || getAppUrlFromToml() || "http://localhost:3000"
 
 /**
@@ -96,9 +97,12 @@ export async function GET(req: NextRequest) {
     // If HMAC and timestamp are present, this is an installation request - verify it
     if (hmac && timestamp) {
       console.error("🔐 Verifying HMAC signature...")
+      console.error("🔍 Secret available:", SHOPIFY_CLIENT_SECRET ? "YES" : "NO")
+      console.error("🔍 Secret length:", SHOPIFY_CLIENT_SECRET.length)
       const queryParams = new URL(req.url).searchParams
       if (!verifyInstallationRequest(queryParams, SHOPIFY_CLIENT_SECRET)) {
         console.error("❌ ERROR: Invalid HMAC signature")
+        console.error("�� This usually means SHOPIFY_CLIENT_SECRET is missing or incorrect")
         return NextResponse.json({ error: "Invalid HMAC signature" }, { status: 401 })
       }
       console.error("✅ HMAC signature verified")

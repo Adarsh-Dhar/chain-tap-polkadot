@@ -1,0 +1,28 @@
+# Learn more about configuring your app at https://shopify.dev/docs/apps/tools/cli/configuration
+
+client_id = "8cddb669a95bca8e0d60a7bfd1cbd3bf"
+name = "discount-coupon"
+application_url = "https://91ed22d78410.ngrok-free.app"
+embedded = true
+
+[build]
+automatically_update_urls_on_dev = true
+include_config_on_deploy = true
+
+[auth]
+redirect_urls = [
+  "https://91ed22d78410.ngrok-free.app/api/auth/callback"
+]
+
+[webhooks]
+api_version = "2025-10"
+
+[access_scopes]
+scopes = "write_discounts,read_products"
+
+[capabilities]
+checkout_ui_extension = true
+order_discounts = true
+product_discounts = true
+api_access = true
+

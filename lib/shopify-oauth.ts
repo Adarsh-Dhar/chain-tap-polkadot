@@ -73,6 +73,16 @@ export function verifyInstallationRequest(queryParams: URLSearchParams, secret: 
     .update(message)
     .digest("hex")
 
+  // DEBUG: Log the details
+  console.error("🔍 HMAC Verification Debug:")
+  console.error("  Message (sorted params):", message)
+  console.error("  Secret length:", secret.length)
+  console.error("  Secret prefix:", secret.substring(0, 10) + "...")
+  console.error("  Computed HMAC:", computed)
+  console.error("  Received HMAC:", hmac)
+  console.error("  Match:", computed === hmac)
+  console.error("  All params:", Array.from(queryParams.entries()))
+
   // Use timing-safe comparison
   try {
     return crypto.timingSafeEqual(Buffer.from(computed), Buffer.from(hmac))
