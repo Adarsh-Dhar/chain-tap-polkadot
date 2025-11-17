@@ -136,7 +136,8 @@ export async function POST(
   for (const target of forwardTargets) {
     try {
       const controller = new AbortController()
-      const timeout = setTimeout(() => controller.abort(), 5000)
+      // Increased timeout to 60 seconds to allow time for automatic token creation
+      const timeout = setTimeout(() => controller.abort(), 60000)
       const forwardResponse = await fetch(target.url, {
         method: "POST",
         headers: {

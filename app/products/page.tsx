@@ -770,15 +770,84 @@ export default function ProductsPage() {
     }
   }
 
-  const ensureProductToken = (product: Product): { hasToken: boolean; assetId?: number } => {
-    const assetId = productTokens.get(product.id)
+  const ensureProductToken = async (product: Product): Promise<{ hasToken: boolean; assetId?: number }> => {
+    // Check if token already exists
+    let assetId = productTokens.get(product.id)
 
-    if (!assetId) {
-      alert("You need to create a token for this product before you can add it to the cart or purchase it.")
-      return { hasToken: false }
+    if (assetId) {
+      return { hasToken: true, assetId }
     }
 
-    return { hasToken: true, assetId }
+    // Token doesn't exist, create it automatically
+    setCreatingTokens((prev) => new Set(prev).add(product.id))
+
+    try {
+      // Generate token name and symbol from product
+      const name = `${product.title} Token`
+      const symbol = product.title
+        .replace(/[^A-Za-z0-9]/g, "")
+        .slice(0, 6)
+        .toUpperCase() || "TOKEN"
+
+      const productId = product.id.split("/").pop() || product.id
+      const response = await fetch(`/api/products/${productId}/token`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ 
+          name, 
+          symbol,
+          productMetadata: product // Send full product object with all metadata
+        }),
+      })
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}))
+        
+        // Handle case where token already exists (race condition)
+        if (response.status === 409 && errorData.existing) {
+          // Token already exists, update local state
+          if (errorData.assetId) {
+            assetId = errorData.assetId
+            setProductTokens((prev) => {
+              const next = new Map(prev)
+              next.set(product.id, assetId!)
+              return next
+            })
+            return { hasToken: true, assetId }
+          }
+        }
+        
+        throw new Error(errorData.error || `Failed to create token: ${response.statusText}`)
+      }
+
+      const data = await response.json()
+      assetId = data?.assetId || data?.id
+      
+      // Update local state with new token
+      if (assetId) {
+        setProductTokens((prev) => {
+          const next = new Map(prev)
+          next.set(product.id, assetId!)
+          return next
+        })
+      } else {
+        throw new Error("Token created but no asset ID returned")
+      }
+
+      return { hasToken: true, assetId }
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : "Failed to create token"
+      console.error("Error creating token:", errorMessage)
+      return { hasToken: false }
+    } finally {
+      setCreatingTokens((prev) => {
+        const next = new Set(prev)
+        next.delete(product.id)
+        return next
+      })
+    }
   }
 
   const handleBuy = async (product: Product, quantity: number = 1) => {
@@ -787,8 +856,10 @@ export default function ProductsPage() {
       return
     }
 
-    const { hasToken, assetId } = ensureProductToken(product)
-    if (!hasToken) {
+    // Ensure token exists (create if missing)
+    const { hasToken, assetId } = await ensureProductToken(product)
+    if (!hasToken || !assetId) {
+      alert("Failed to create token for this product. Please try again or contact support.")
       return
     }
 
@@ -916,15 +987,49 @@ export default function ProductsPage() {
       return
     }
 
-    // Ensure all cart items still have tokens
+    // Ensure all cart items have tokens (create automatically if missing)
     const missingTokenItems = cart.filter((item) => !item.assetId)
     if (missingTokenItems.length > 0) {
-      alert(
-        "Each product needs an associated token before checkout. " +
-          "Please create tokens for the following products and re-add them to the cart:\n\n" +
-          missingTokenItems.map((item) => item.product.title).join("\n")
-      )
-      return
+      // Set loading state early to show user that token creation is in progress
+      setCreatingCheckout(true)
+      try {
+        // Create tokens for all missing items
+        const tokenCreationResults = await Promise.all(
+          missingTokenItems.map(async (item) => {
+            const result = await ensureProductToken(item.product)
+            if (result.hasToken && result.assetId) {
+              // Update cart item with the new assetId
+              setCart((prevCart) =>
+                prevCart.map((cartItem) =>
+                  cartItem.productId === item.productId && cartItem.variantId === item.variantId
+                    ? { ...cartItem, assetId: result.assetId }
+                    : cartItem
+                )
+              )
+              return { success: true, product: item.product, assetId: result.assetId }
+            } else {
+              return { success: false, product: item.product, error: "Failed to create token" }
+            }
+          })
+        )
+
+        // Check if any token creations failed
+        const failedCreations = tokenCreationResults.filter((r) => !r.success)
+        if (failedCreations.length > 0) {
+          const failedProducts = failedCreations.map((r) => r.product.title).join("\n")
+          alert(
+            `Failed to create tokens for the following products:\n\n${failedProducts}\n\nPlease try again or contact support.`
+          )
+          setCreatingCheckout(false)
+          return
+        }
+        // Continue to checkout - keep setCreatingCheckout(true) for the checkout process
+      } catch (error) {
+        console.error("Error creating tokens for cart items:", error)
+        alert("An error occurred while creating tokens. Please try again.")
+        setCreatingCheckout(false)
+        return
+      }
     }
 
     // Validate all items have variant IDs
@@ -1117,9 +1222,11 @@ export default function ProductsPage() {
     return getAvailableInventory(product)
   }
 
-  const handleAddToCart = (product: Product) => {
-    const { hasToken, assetId } = ensureProductToken(product)
-    if (!hasToken) {
+  const handleAddToCart = async (product: Product) => {
+    // Ensure token exists (create if missing)
+    const { hasToken, assetId } = await ensureProductToken(product)
+    if (!hasToken || !assetId) {
+      alert("Failed to create token for this product. Please try again or contact support.")
       return
     }
 

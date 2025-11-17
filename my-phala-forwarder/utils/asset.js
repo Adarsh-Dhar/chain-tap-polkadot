@@ -1,5 +1,6 @@
 const { BN } = require('@polkadot/util');
 const { initPolkadot, getWallet } = require('./blockchain');
+const { transactionQueue } = require('./transactionQueue');
 
 let api = null;
 let wallet = null;
@@ -441,68 +442,70 @@ async function createAssetIfMissing(desiredAssetId, metadata) {
   // If that works, we can set metadata in a follow-up transaction
   console.log('Step 1: Creating asset (without metadata first)...');
   
-  await new Promise((resolve, reject) => {
-    let transactionHash = null;
-    let transactionSubmitted = false;
-    
-    const timeout = setTimeout(async () => {
-      // Before resolving/rejecting, check if transaction was actually included
-      if (transactionSubmitted && transactionHash) {
-        console.log(`⏳ Timeout reached, checking if transaction ${transactionHash} was included...`);
-        try {
-          // Try to find the transaction in recent blocks
-          const header = await api.rpc.chain.getHeader();
-          const currentBlock = header.number.toNumber();
-          
-          // Check last 20 blocks (more than minting since asset creation might take longer)
-          for (let i = 0; i < 20; i++) {
-            const blockNumber = currentBlock - i;
-            if (blockNumber < 0) break;
+  // Use transaction queue to handle priority errors with retries
+  await transactionQueue.add(async (tip) => {
+    return new Promise((resolve, reject) => {
+      let transactionHash = null;
+      let transactionSubmitted = false;
+      
+      const timeout = setTimeout(async () => {
+        // Before resolving/rejecting, check if transaction was actually included
+        if (transactionSubmitted && transactionHash) {
+          console.log(`⏳ Timeout reached, checking if transaction ${transactionHash} was included...`);
+          try {
+            // Try to find the transaction in recent blocks
+            const header = await api.rpc.chain.getHeader();
+            const currentBlock = header.number.toNumber();
             
-            try {
-              const blockHash = await api.rpc.chain.getBlockHash(blockNumber);
-              const block = await api.rpc.chain.getBlock(blockHash);
+            // Check last 20 blocks (more than minting since asset creation might take longer)
+            for (let i = 0; i < 20; i++) {
+              const blockNumber = currentBlock - i;
+              if (blockNumber < 0) break;
               
-              const found = block.block.extrinsics.find(ext => {
-                if (ext.isSigned) {
-                  const hash = ext.hash.toString();
-                  return hash === transactionHash;
+              try {
+                const blockHash = await api.rpc.chain.getBlockHash(blockNumber);
+                const block = await api.rpc.chain.getBlock(blockHash);
+                
+                const found = block.block.extrinsics.find(ext => {
+                  if (ext.isSigned) {
+                    const hash = ext.hash.toString();
+                    return hash === transactionHash;
+                  }
+                  return false;
+                });
+                
+                if (found) {
+                  clearTimeout(timeout);
+                  console.log(`✓ Transaction ${transactionHash} was found in block ${blockNumber}`);
+                  resolve();
+                  return;
                 }
-                return false;
-              });
-              
-              if (found) {
-                clearTimeout(timeout);
-                console.log(`✓ Transaction ${transactionHash} was found in block ${blockNumber}`);
-                resolve();
-                return;
+              } catch (e) {
+                // Continue checking other blocks
               }
-            } catch (e) {
-              // Continue checking other blocks
             }
+          } catch (e) {
+            console.log(`Could not verify transaction status: ${e.message}`);
           }
-        } catch (e) {
-          console.log(`Could not verify transaction status: ${e.message}`);
+          
+          // Transaction was submitted but not confirmed in time
+          console.warn(`⚠️  Transaction ${transactionHash} was submitted but not confirmed within timeout. It may still be processing.`);
+          // Check if asset was actually created despite timeout
+          // For now, resolve to allow the process to continue
+          resolve();
+        } else {
+          reject(new Error('Asset creation transaction timeout after 120 seconds. The transaction may not have been submitted.'));
         }
-        
-        // Transaction was submitted but not confirmed in time
-        console.warn(`⚠️  Transaction ${transactionHash} was submitted but not confirmed within timeout. It may still be processing.`);
-        // Check if asset was actually created despite timeout
-        // For now, resolve to allow the process to continue
-        resolve();
-      } else {
-        reject(new Error('Asset creation transaction timeout after 120 seconds. The transaction may not have been submitted.'));
-      }
-    }, 120000); // 120 second timeout
+      }, 120000); // 120 second timeout
 
-    console.log(`Sending create transaction with asset ID: ${assetIdForTx}`);
+      console.log(`Sending create transaction with asset ID: ${assetIdForTx} (tip: ${tip.toString()})`);
 
-    // Use explicit nonce (same pattern as minting code which works)
-    // Use wallet from getWallet() to ensure we're using the exact same instance as minting
-    const signingWallet = getWallet() || wallet;
-    console.log(`Signing with wallet: ${signingWallet.address}`);
-    // Let API manage nonce automatically to avoid future/stuck transactions due to pending pool
-    tx.signAndSend(signingWallet, { tip: 2000000000 }, ({ status, txHash, dispatchError, events }) => {
+      // Use explicit nonce (same pattern as minting code which works)
+      // Use wallet from getWallet() to ensure we're using the exact same instance as minting
+      const signingWallet = getWallet() || wallet;
+      console.log(`Signing with wallet: ${signingWallet.address}`);
+      // Use the tip from the queue (increases with retries)
+      tx.signAndSend(signingWallet, { tip }, ({ status, txHash, dispatchError, events }) => {
       // Capture txHash as soon as we get it
       if (txHash) {
         const hashStr = txHash.toString();
@@ -617,6 +620,13 @@ async function createAssetIfMissing(desiredAssetId, metadata) {
       console.error('❌ Asset creation send error:', error.message);
       reject(new Error(`Failed to send asset creation transaction: ${error.message}`));
     });
+    });
+  }, {
+    maxRetries: 5,
+    baseDelay: 3000, // 3 seconds
+    maxDelay: 30000, // 30 seconds max wait
+    baseTip: 2000000000, // 0.002 WND base tip
+    tipMultiplier: 1.5, // Increase tip by 50% each retry
   });
 
   return finalAssetId;
